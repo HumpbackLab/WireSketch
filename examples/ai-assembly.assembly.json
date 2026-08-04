@@ -1,0 +1,69 @@
+{
+  "schema": "urn:wiresketch:schema:assembly:1.0",
+  "schemaVersion": "1.1.0",
+  "kind": "wiresketch/assembly",
+  "version": 1,
+  "id": "assembly_uart_demo",
+  "name": "UART 调试连接",
+  "description": "主控板通过交叉 TX/RX 连接 USB-TTL。",
+  "layout": {
+    "origin": "top-left",
+    "axisX": "right",
+    "axisY": "down",
+    "unit": "diagram-px",
+    "routing": "orthogonal"
+  },
+  "nodes": [
+    { "id": "node_controller", "boardId": "pcb_controller", "label": "主控板", "x": 80, "y": 100, "rotation": 0, "flipX": false, "scale": 1 },
+    { "id": "node_debugger", "boardId": "pcb_debugger", "label": "USB-TTL", "x": 390, "y": 100, "rotation": 90, "flipX": true, "scale": 1.2 }
+  ],
+  "connections": [
+    {
+      "id": "wire_uart0",
+      "description": "UART 信号交叉连接，共地。",
+      "from": { "nodeId": "node_controller", "interfaceId": "if_uart0" },
+      "to": { "nodeId": "node_debugger", "interfaceId": "if_uart" },
+      "pinMap": [
+        { "from": 1, "to": 2 },
+        { "from": 2, "to": 1 },
+        { "from": 3, "to": 3 }
+      ]
+    }
+  ],
+  "embeddedBoards": [
+    {
+      "schema": "urn:wiresketch:schema:pcb:1.0",
+      "schemaVersion": "1.1.0",
+      "kind": "wiresketch/pcb",
+      "version": 1,
+      "id": "pcb_controller",
+      "name": "主控板",
+      "description": "3.3 V UART 主控板。",
+      "coordinateSystem": { "origin": "top-left", "axisX": "right", "axisY": "down", "regionUnit": "normalized" },
+      "image": null,
+      "imageSize": { "width": 420, "height": 260, "unit": "px" },
+      "source": "generated",
+      "generated": { "width": 420, "height": 260, "color": "#1D5B42" },
+      "interfaces": [
+        { "id": "if_uart0", "name": "UART0", "type": "uart", "description": "3.3 V TTL。", "rect": { "x": 0.86, "y": 0.25, "w": 0.12, "h": 0.5 }, "rotation": 270, "pins": ["TX", "RX", "GND"] }
+      ]
+    },
+    {
+      "schema": "urn:wiresketch:schema:pcb:1.0",
+      "schemaVersion": "1.1.0",
+      "kind": "wiresketch/pcb",
+      "version": 1,
+      "id": "pcb_debugger",
+      "name": "USB-TTL",
+      "description": "USB 转 3.3 V TTL 串口。",
+      "coordinateSystem": { "origin": "top-left", "axisX": "right", "axisY": "down", "regionUnit": "normalized" },
+      "image": null,
+      "imageSize": { "width": 360, "height": 220, "unit": "px" },
+      "source": "generated",
+      "generated": { "width": 360, "height": 220, "color": "#245069" },
+      "interfaces": [
+        { "id": "if_uart", "name": "UART", "type": "uart", "description": "3.3 V TTL。", "rect": { "x": 0.02, "y": 0.25, "w": 0.14, "h": 0.5 }, "rotation": 90, "pins": ["RXD", "TXD", "GND"] }
+      ]
+    }
+  ]
+}

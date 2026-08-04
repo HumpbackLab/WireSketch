@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="轻量级 PCB 接口标注与连接图绘制工具" />
+    <title>WireSketch · PCB 连接图</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="#" aria-label="WireSketch 首页">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span>WireSketch</span>
+      </a>
+      <nav class="mode-switch" aria-label="工作区">
+        <button class="mode-btn active" data-view="board">板卡标注</button>
+        <button class="mode-btn" data-view="assembly">连接装配</button>
+      </nav>
+      <div class="top-actions">
+        <span class="save-status"><i></i> 已自动保存</span>
+        <button class="icon-btn" id="helpBtn" title="使用帮助">?</button>
+      </div>
+    </header>
+
+    <main>
+      <section id="boardView" class="workspace active">
+        <aside class="sidebar left-panel">
+          <div class="panel-heading">
+            <div><span class="eyebrow">PCB LIBRARY</span><h2>板卡库</h2></div>
+            <button class="square-btn" id="newBoardBtn" title="新建板卡">＋</button>
+          </div>
+          <label class="search-box">
+            <span>⌕</span><input id="boardSearch" type="search" placeholder="搜索板卡…" />
+          </label>
+          <div id="boardList" class="board-list"></div>
+          <div class="sidebar-footer">
+            <button class="secondary-btn full" id="importBoardsBtn">导入描述文件</button>
+            <input id="importBoardsInput" type="file" accept="application/json,.json,.pcb.json" multiple hidden />
+          </div>
+        </aside>
+
+        <section class="main-panel board-editor">
+          <div class="editor-toolbar">
+            <div>
+              <span class="breadcrumb">板卡库 / <b id="boardBreadcrumb">未命名板卡</b></span>
+              <input id="boardName" class="title-input" value="未命名板卡" aria-label="板卡名称" />
+            </div>
+            <div class="toolbar-actions">
+              <button class="secondary-btn" id="replaceImageBtn">替换图片</button>
+              <button class="primary-btn" id="exportBoardBtn">导出 PCB 描述</button>
+              <input id="imageInput" type="file" accept="image/*" hidden />
+            </div>
+          </div>
+
+          <div class="editor-content">
+            <div class="canvas-section">
+              <div class="section-tip"><span class="step-pill">1</span> 在图片上拖拽框选接口</div>
+              <div id="virtualBoardControls" class="virtual-board-controls hidden">
+                <span class="virtual-badge">虚拟 PCB</span>
+                <label>宽 <input id="virtualBoardWidth" type="number" min="120" max="2400" step="10" value="420" /> px</label>
+                <label>高 <input id="virtualBoardHeight" type="number" min="80" max="1600" step="10" value="260" /> px</label>
+                <label>背景 <input id="virtualBoardColor" type="color" value="#1d5b42" /></label>
+                <span class="virtual-tip">修改上方名称可同步更新板中文字</span>
+              </div>
+              <div id="imageStage" class="image-stage" tabindex="0">
+                <div id="emptyImage" class="empty-image">
+                  <div class="upload-graphic">⌁</div>
+                  <h3>添加 PCB 图片</h3>
+                  <p>支持 PNG、JPG、WEBP，建议使用俯视图</p>
+                  <button class="primary-btn" id="uploadImageBtn">选择图片</button>
+                </div>
+                <div id="imageWorkspace" class="image-workspace hidden">
+                  <img id="boardImage" alt="PCB 板卡" draggable="false" />
+                  <div id="interfaceOverlay" class="interface-overlay"></div>
+                </div>
+              </div>
+              <div class="canvas-hint">
+                <span><span class="mouse-icon"></span> 按住鼠标左键框选 · 点击标注可编辑 · Delete 删除</span>
+                <div class="board-zoom-controls">
+                  <button id="boardZoomOutBtn" title="缩小">−</button>
+                  <span id="boardZoomLabel">适配</span>
+                  <button id="boardZoomInBtn" title="放大">＋</button>
+                  <button id="boardZoomFitBtn" class="fit-btn" title="完整显示图片">适配</button>
+                </div>
+              </div>
+            </div>
+
+            <aside class="property-panel">
+              <div class="section-tip"><span class="step-pill">2</span> 编辑接口定义</div>
+              <div id="interfaceEmpty" class="property-empty">
+                <div class="empty-symbol">⌗</div>
+                <h3>还没有选中接口</h3>
+                <p>在左侧图片上拖拽一个矩形，创建接口区域。</p>
+              </div>
+              <form id="interfaceForm" class="interface-form hidden">
+                <label>接口名称<input id="interfaceName" required placeholder="例如：J1 / UART" /></label>
+                <div class="field-row">
+                  <label>接口类型<select id="interfaceType"><option value="generic">通用</option><option value="power">电源</option><option value="uart">UART</option><option value="i2c">I²C</option><option value="spi">SPI</option><option value="usb">USB</option><option value="gpio">GPIO</option></select></label>
+                  <label>针脚数量<input id="pinCount" type="number" min="1" max="64" value="4" /></label>
+                </div>
+                <label class="orientation-field">接口旋转 / Pin 1 方位
+                  <select id="interfaceRotation">
+                    <option value="0">0° · Pin 1 在左</option>
+                    <option value="90">90° · Pin 1 在上</option>
+                    <option value="180">180° · Pin 1 在右</option>
+                    <option value="270">270° · Pin 1 在下</option>
+                  </select>
+                  <small>角度为顺时针方向；画布上的红色 P1 标记表示线序起点。</small>
+                </label>
+                <div class="pins-heading"><span>线序 / 针脚定义</span><small>从 Pin 1 开始</small></div>
+                <div id="pinList" class="pin-list"></div>
+                <button type="button" class="danger-link" id="deleteInterfaceBtn">删除此接口</button>
+              </form>
+            </aside>
+          </div>
+        </section>
+      </section>
+
+      <section id="assemblyView" class="workspace">
+        <aside class="sidebar left-panel assembly-sidebar">
+          <div class="panel-heading"><div><span class="eyebrow">COMPONENTS</span><h2>可用板卡</h2></div></div>
+          <p class="panel-note">拖拽或点击板卡添加到画布</p>
+          <div id="componentList" class="component-list"></div>
+          <div class="sidebar-footer stack">
+            <button class="secondary-btn full" id="assemblyImportBoardsBtn">导入 PCB 描述</button>
+            <button class="secondary-btn full" id="importAssemblyBtn">打开装配体</button>
+            <input id="assemblyImportBoardsInput" type="file" accept="application/json,.json" multiple hidden />
+            <input id="importAssemblyInput" type="file" accept="application/json,.json" hidden />
+          </div>
+        </aside>
+
+        <section class="main-panel assembly-editor">
+          <div class="editor-toolbar assembly-toolbar">
+            <div>
+              <span class="breadcrumb">装配体</span>
+              <input id="assemblyName" class="title-input" value="新建连接图" aria-label="装配体名称" />
+            </div>
+            <div class="toolbar-actions">
+              <button class="secondary-btn" id="clearAssemblyBtn">清空</button>
+              <button class="secondary-btn accent" id="autoLayoutBtn">✦ 自动美化布局</button>
+              <button class="secondary-btn" id="renderAssemblyBtn">导出图片</button>
+              <button class="primary-btn" id="exportAssemblyBtn">导出装配体</button>
+            </div>
+          </div>
+          <div id="assemblyCanvas" class="assembly-canvas">
+            <svg id="wireLayer" class="wire-layer" width="100%" height="100%" aria-hidden="true"></svg>
+            <div id="nodeLayer" class="node-layer"></div>
+            <div id="assemblyEmpty" class="assembly-empty">
+              <div class="flow-graphic"><span></span><i>＋</i><span></span></div>
+              <h3>开始搭建连接图</h3>
+              <p>从左侧添加板卡，然后依次点击两个接口建立连接</p>
+            </div>
+            <div class="canvas-controls">
+              <button id="zoomOutBtn" title="缩小">−</button><span id="zoomLabel">100%</span><button id="zoomInBtn" title="放大">＋</button>
+            </div>
+            <div id="connectionToast" class="connection-toast hidden"></div>
+          </div>
+          <div class="statusbar">
+            <span><i class="dot blue"></i><b id="nodeCount">0</b> 块板卡</span>
+            <span><i class="dot orange"></i><b id="wireCount">0</b> 根导线</span>
+            <span class="status-help">提示：板卡下方可缩放 · 选中后按 R 旋转、F 翻转</span>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <dialog id="helpDialog">
+      <button class="dialog-close" aria-label="关闭">×</button>
+      <span class="eyebrow">QUICK GUIDE</span><h2>三步画好连接图</h2>
+      <ol><li><b>创建板卡</b><span>上传 PCB 俯视图片，在接口位置拖拽框选，填写针脚线序。</span></li><li><b>定义连接</b><span>进入“连接装配”，添加板卡并依次点击需要相连的接口。</span></li><li><b>整理与导出</b><span>拖动板卡自由摆放，或使用自动布局，然后导出 JSON 装配体文件。</span></li></ol>
+      <p class="dialog-note">所有编辑会自动保存在当前浏览器中。</p>
+    </dialog>
+    <script src="app.js"></script>
+  </body>
+</html>

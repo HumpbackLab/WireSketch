@@ -1,0 +1,27 @@
+# OS and editor files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# JavaScript tooling (the app itself has no runtime dependencies)
+node_modules/
+dist/
+coverage/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Local temporary files
+*.tmp
+*.bak
+.cache/
+
+# Generated render previews and visual debugging output
+assembly-current.png
+assembly-current.svg
+test.png

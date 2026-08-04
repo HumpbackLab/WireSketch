@@ -1,0 +1,39 @@
+{
+  "schema": "urn:wiresketch:schema:pcb:1.0",
+  "schemaVersion": "1.1.0",
+  "kind": "wiresketch/pcb",
+  "version": 1,
+  "id": "pcb_controller",
+  "name": "主控板",
+  "description": "5 V 供电的主控板，使用 UART0 连接调试模块。",
+  "coordinateSystem": {
+    "origin": "top-left",
+    "axisX": "right",
+    "axisY": "down",
+    "regionUnit": "normalized"
+  },
+  "image": null,
+  "imageSize": { "width": 420, "height": 260, "unit": "px" },
+  "source": "generated",
+  "generated": { "width": 420, "height": 260, "color": "#1D5B42" },
+  "interfaces": [
+    {
+      "id": "if_power",
+      "name": "POWER",
+      "type": "power",
+      "description": "5 V 电源输入。",
+      "rect": { "x": 0.02, "y": 0.28, "w": 0.12, "h": 0.44 },
+      "rotation": 90,
+      "pins": ["5V", "GND"]
+    },
+    {
+      "id": "if_uart0",
+      "name": "UART0",
+      "type": "uart",
+      "description": "3.3 V TTL 电平。",
+      "rect": { "x": 0.86, "y": 0.25, "w": 0.12, "h": 0.5 },
+      "rotation": 270,
+      "pins": ["TX", "RX", "GND"]
+    }
+  ]
+}

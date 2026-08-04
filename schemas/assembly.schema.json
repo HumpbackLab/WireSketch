@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wiresketch.dev/schemas/assembly-1.0.schema.json",
+  "title": "WireSketch assembly description",
+  "description": "PCB instances, interface-to-interface connections, pin mappings, and diagram layout.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "schemaVersion", "kind", "version", "id", "name", "layout", "nodes", "connections", "embeddedBoards"],
+  "properties": {
+    "schema": { "const": "urn:wiresketch:schema:assembly:1.0", "description": "Stable format identifier. Never translate or modify it." },
+    "schemaVersion": { "const": "1.1.0" },
+    "kind": { "const": "wiresketch/assembly" },
+    "version": { "const": 1 },
+    "id": { "$ref": "#/$defs/id" },
+    "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+    "description": { "type": "string", "default": "" },
+    "layout": { "$ref": "#/$defs/layout" },
+    "nodes": {
+      "type": "array",
+      "description": "Board instances. Multiple nodes may reference the same boardId.",
+      "items": { "$ref": "#/$defs/node" }
+    },
+    "connections": {
+      "type": "array",
+      "description": "Directed records used to define endpoint and pin-map orientation; electrical flow may still be bidirectional.",
+      "items": { "$ref": "#/$defs/connection" }
+    },
+    "embeddedBoards": {
+      "type": "array",
+      "description": "Self-contained PCB definitions referenced by nodes[].boardId. Include each board definition once.",
+      "items": { "$ref": "pcb-1.0.schema.json" }
+    }
+  },
+  "$defs": {
+    "id": { "type": "string", "minLength": 1, "maxLength": 160, "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$" },
+    "layout": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["origin", "axisX", "axisY", "unit", "routing"],
+      "properties": {
+        "origin": { "const": "top-left" },
+        "axisX": { "const": "right" },
+        "axisY": { "const": "down" },
+        "unit": { "const": "diagram-px" },
+        "routing": { "enum": ["hybrid", "orthogonal", "manual"], "description": "hybrid prefers clear diagonal wire bundles and falls back to obstacle-avoiding orthogonal routes." }
+      }
+    },
+    "node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "boardId", "label", "x", "y"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id", "description": "Unique instance ID inside this assembly." },
+        "boardId": { "$ref": "#/$defs/id", "description": "References embeddedBoards[].id, not another node ID." },
+        "label": { "type": "string", "minLength": 1, "maxLength": 120, "description": "Instance label; it may differ from the board definition name." },
+        "x": { "type": "number", "description": "Left coordinate in diagram-px." },
+        "y": { "type": "number", "description": "Top coordinate in diagram-px." },
+        "rotation": { "type": "integer", "enum": [0, 90, 180, 270], "default": 0, "description": "Clockwise rotation of this PCB instance. Omitted values are treated as 0 for backward compatibility." },
+        "flipX": { "type": "boolean", "default": false, "description": "Mirrors this PCB instance horizontally in its local, unrotated coordinate system." },
+        "scale": { "type": "number", "minimum": 0.5, "maximum": 2, "default": 1, "description": "Visual scale of this PCB instance. Image, interfaces, pins, routing anchors, and export output scale together." }
+      }
+    },
+    "endpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["nodeId", "interfaceId"],
+      "properties": {
+        "nodeId": { "$ref": "#/$defs/id", "description": "References nodes[].id." },
+        "interfaceId": { "$ref": "#/$defs/id", "description": "References the selected node's PCB interfaces[].id." }
+      }
+    },
+    "pinPair": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "to"],
+      "properties": {
+        "from": { "type": "integer", "minimum": 1, "description": "1-based physical pin number on the from endpoint." },
+        "to": { "type": "integer", "minimum": 1, "description": "1-based physical pin number on the to endpoint." }
+      }
+    },
+    "connection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "description", "from", "to", "pinMap"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "description": { "type": "string", "default": "" },
+        "from": { "$ref": "#/$defs/endpoint" },
+        "to": { "$ref": "#/$defs/endpoint" },
+        "pinMap": {
+          "type": "array",
+          "description": "Explicit 1-based wire mapping. An empty array means the connection exists but its physical wiring is unspecified.",
+          "items": { "$ref": "#/$defs/pinPair" }
+        }
+      }
+    }
+  }
+}
