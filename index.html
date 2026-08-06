@@ -143,46 +143,56 @@
               <button class="primary-btn" id="exportAssemblyBtn">导出装配体</button>
             </div>
           </div>
-          <div id="assemblyCanvas" class="assembly-canvas">
-            <svg id="wireLayer" class="wire-layer" width="100%" height="100%" aria-hidden="true"></svg>
-            <div id="nodeLayer" class="node-layer"></div>
-            <div id="assemblyEmpty" class="assembly-empty">
-              <div class="flow-graphic"><span></span><i>＋</i><span></span></div>
-              <h3>开始搭建连接图</h3>
-              <p>从左侧添加板卡，然后依次点击两个接口建立连接</p>
+          <div id="assemblyViewport" class="assembly-viewport">
+            <div id="assemblyCanvas" class="assembly-canvas">
+              <svg id="wireLayer" class="wire-layer" aria-hidden="true"></svg>
+              <div id="nodeLayer" class="node-layer"></div>
+              <div id="assemblyEmpty" class="assembly-empty">
+                <div class="flow-graphic"><span></span><i>＋</i><span></span></div>
+                <h3>开始搭建连接图</h3>
+                <p>从左侧添加板卡，然后依次点击两个接口建立连接</p>
+              </div>
+              <div class="canvas-controls">
+                <button id="zoomOutBtn" title="缩小">−</button><span id="zoomLabel">100%</span><button id="zoomInBtn" title="放大">＋</button>
+              </div>
+              <div id="connectionToast" class="connection-toast hidden"></div>
             </div>
-            <div class="canvas-controls">
-              <button id="zoomOutBtn" title="缩小">−</button><span id="zoomLabel">100%</span><button id="zoomInBtn" title="放大">＋</button>
-            </div>
-            <div id="connectionToast" class="connection-toast hidden"></div>
           </div>
           <div class="statusbar">
             <span><i class="dot blue"></i><b id="nodeCount">0</b> 块板卡</span>
             <span><i class="dot orange"></i><b id="wireCount">0</b> 根导线</span>
-            <span class="status-help">提示：板卡下方可缩放 · 选中后按 R 旋转、F 翻转</span>
+            <span class="status-help">提示：滚轮缩放画布 · 单击选择 · 选中板卡后按 R 旋转、F 翻转</span>
           </div>
         </section>
         <aside class="assembly-property-panel">
-          <div class="assembly-property-heading"><span class="eyebrow">PROPERTIES</span><h2>装配属性</h2></div>
-          <section class="property-group">
-            <h3>全局导线</h3>
-            <div class="compact-field-row">
-              <label>默认线宽<input id="defaultWireWidth" type="number" min="1" max="8" step="0.1" value="2.2" /></label>
-              <label>线间距<input id="defaultWireGap" type="number" min="2" max="16" step="1" value="6" /></label>
-            </div>
+          <div class="assembly-property-heading"><span class="eyebrow">PROPERTIES</span><h2 id="assemblyPropertyTitle">全局属性</h2></div>
+          <section id="globalPropertyGroup" class="property-group">
+            <h3>全局设置</h3>
+            <label class="range-field"><span>默认线宽<output id="defaultWireWidthValue">2.2</output></span><input id="defaultWireWidth" type="range" min="1" max="8" step="0.1" value="2.2" /></label>
+            <label class="range-field"><span>默认标签间距<output id="defaultWireGapValue">6</output></span><input id="defaultWireGap" type="range" min="0" max="24" step="1" value="6" /></label>
+            <label class="range-field"><span>默认导线间距<output id="defaultRouteGapValue">6</output></span><input id="defaultRouteGap" type="range" min="0" max="20" step="0.5" value="6" /></label>
+            <label class="range-field"><span>默认折线圆角<output id="defaultCornerRadiusValue">0</output></span><input id="defaultCornerRadius" type="range" min="0" max="24" step="1" value="0" /></label>
+            <label class="range-field"><span>画布宽度<output id="canvasWidthValue">1200</output></span><input id="canvasWidth" type="range" min="600" max="3000" step="50" value="1200" /></label>
+            <label class="range-field"><span>画布高度<output id="canvasHeightValue">800</output></span><input id="canvasHeight" type="range" min="400" max="2000" step="50" value="800" /></label>
             <label class="check-field"><input id="defaultShowFromLabels" type="checkbox" checked /><span>默认显示端点 1 信号名</span></label>
             <label class="check-field"><input id="defaultShowToLabels" type="checkbox" checked /><span>默认显示端点 2 信号名</span></label>
           </section>
-          <section class="property-group wire-property-group">
+          <section id="nodePropertyGroup" class="property-group hidden">
+            <h3>所选板卡 · 接口标签间距</h3>
+            <div id="nodePropertySummary" class="wire-endpoint-summary"></div>
+            <label class="check-field"><input id="nodeFixed" type="checkbox" /><span>固定板卡位置</span></label>
+            <div id="nodeInterfaceGaps" class="interface-gap-list"></div>
+            <button type="button" class="secondary-btn full" id="resetNodeGapsBtn">全部恢复全局标签间距</button>
+          </section>
+          <section id="wirePropertyGroup" class="property-group wire-property-group hidden">
             <h3>所选信号线</h3>
-            <div id="wirePropertyEmpty" class="compact-empty">
-              <div class="empty-symbol">⌁</div>
-              <p>点击画布中的导线<br />可设置名称和标签显示。</p>
-            </div>
-            <form id="wirePropertyForm" class="wire-property-form hidden">
+            <form id="wirePropertyForm" class="wire-property-form">
               <div id="wireEndpointSummary" class="wire-endpoint-summary"></div>
               <label>中间显示名称<input id="wireDisplayName" maxlength="80" placeholder="留空则不显示" /></label>
-              <label>线宽覆盖<input id="wireWidth" type="number" min="1" max="8" step="0.1" placeholder="跟随全局" /></label>
+              <label class="range-field"><span>线宽<output id="wireWidthValue">2.2</output></span><input id="wireWidth" type="range" min="1" max="8" step="0.1" value="2.2" /></label>
+              <label class="range-field"><span>折线圆角<output id="wireCornerRadiusValue">0</output></span><input id="wireCornerRadius" type="range" min="0" max="24" step="1" value="0" /></label>
+              <label class="range-field"><span>所属线束间距<output id="wireRouteGapValue">6</output></span><input id="wireRouteGap" type="range" min="0" max="20" step="0.5" value="6" /></label>
+              <button type="button" class="secondary-btn full" id="resetWireGapBtn">线束间距恢复全局</button>
               <label class="check-field"><input id="wireShowFromLabels" type="checkbox" /><span>显示端点 1 信号名</span></label>
               <label class="check-field"><input id="wireShowToLabels" type="checkbox" /><span>显示端点 2 信号名</span></label>
               <button type="button" class="secondary-btn full" id="resetWireStyleBtn">恢复全局样式</button>

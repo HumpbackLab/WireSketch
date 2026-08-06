@@ -60,7 +60,8 @@ nodes[].id ───── connections[].from/to.nodeId
     │                     │
     ├── x / y             └── interfaceId → 对应 PCB interfaces[].id
     ├── rotation / flipX
-    └── scale
+    ├── scale
+    └── interfaceLabelGaps  按接口 ID 覆盖信号标签间距
 
 wireDefaults ──────────── connections[].pinMap[].style
   全局导线默认值             单根信号线可选覆盖值
@@ -74,9 +75,15 @@ wireDefaults ──────────── connections[].pinMap[].style
 
 `nodes[].scale` 控制单个板卡实例的显示大小，当前范围为 `0.5` 到 `2`。PCB 图片、接口位置、针脚端点、避障区域和导出结果必须同步缩放；省略时按 `1` 处理。
 
+`nodes[].fixed` 为 `true` 时，板卡实例不能拖动，自动布局也不得改变其 `x`、`y`；旋转、翻转和缩放不受影响。省略时按 `false` 处理。
+
+`nodes[].interfaceLabelGaps` 按接口 ID 保存同一接口相邻信号名称标签之间增加的间距，范围为 `0` 到 `24`。未设置的接口继承装配体 `wireDefaults.labelGap`。该字段只改变 `5V`、`GND`、`3V3` 等标签的排版位置，不改变任何导线路径或端点坐标。
+
+`canvasSize.width` 和 `canvasSize.height` 保存装配编辑画布的逻辑尺寸，分别限制在 `600`–`3000` 和 `400`–`2000`。视图缩放与画布逻辑尺寸相互独立，不影响节点坐标或图片导出比例。
+
 `connections` 表示接口到接口的线束。`from` 和 `to` 用来确定 `pinMap` 的书写方向，不一定表示电流或信号方向。空的 `pinMap` 表示已知接口相连，但具体线序尚未定义。
 
-装配体 1.2 增加可选的 `wireDefaults`、`connections[].pinMap[].label` 和 `connections[].pinMap[].style`。`wireDefaults` 控制全局线宽、线间距及两端信号标签；每个针脚映射代表一根实际信号线，其 `style` 可以覆盖线宽和标签显示，`label` 非空时显示在该信号线中间。旧文件省略这些字段时使用 `2.2` 线宽、`6` 线间距并显示两端标签。
+装配体 1.2 增加可选的 `wireDefaults`、`connections[].gap`、`connections[].pinMap[].label` 和 `connections[].pinMap[].style`。`wireDefaults` 控制全局线宽、默认信号标签间距、默认导线间距、折线圆角及两端信号标签；`connections[].gap` 可覆盖一组线束的导线间距。每个针脚映射代表一根实际信号线，其 `style` 可以覆盖线宽、圆角和标签显示，`label` 非空时显示在该信号线中间。旧文件省略这些字段时使用 `2.2` 线宽、`6` 标签间距、`6` 导线间距、直角折线并显示两端标签。
 
 `layout.routing` 推荐使用 `hybrid`：接口附近保持短直线引出，中间走廊无障碍时使用平行斜线，被板卡阻挡时才切换为正交避障。`orthogonal` 和 `manual` 保留用于外部工具表达布局意图。
 

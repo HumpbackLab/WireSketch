@@ -13,7 +13,7 @@
     power: ['V+', 'G'],
     usb: ['VCC', 'GND', 'DP', 'DN']
   };
-  const DEFAULT_WIRE_STYLE = {width:2.2, gap:6, showFromLabels:true, showToLabels:true};
+  const DEFAULT_WIRE_STYLE = {width:2.2, gap:6, routeGap:6, cornerRadius:0, showFromLabels:true, showToLabels:true};
   const NODE = { width: 230, height: 215, imageX: 15, imageY: 10, imageWidth: 200, imageHeight: 170 };
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -60,6 +60,7 @@
   let drawStart = null;
   let interfaceDragState = null;
   let dragState = null;
+  let ignoreCanvasClickUntil = 0;
 
   function loadState() {
     try {
@@ -135,27 +136,50 @@
     return [0,90,180,270].includes(rotation)?rotation:0;
   }
   function nodeFlipX(node) { return node?.flipX===true; }
+  function nodeFixed(node) { return node?.fixed===true; }
   function nodeScale(node) {
     const scale=Number(node?.scale);
     return Number.isFinite(scale)?Math.max(.5,Math.min(2,scale)):1;
   }
   function assemblyWireDefaults() {
     const configured=state.assembly.wireDefaults||{};
+    const labelGap=Number(configured.labelGap??configured.gap);
+    const routeGap=Number(configured.routeGap);
+    const cornerRadius=Number(configured.cornerRadius);
     return {
       width:Math.max(1,Math.min(8,Number(configured.width)||DEFAULT_WIRE_STYLE.width)),
-      gap:Math.max(2,Math.min(16,Number(configured.gap)||DEFAULT_WIRE_STYLE.gap)),
+      gap:Number.isFinite(labelGap)?Math.max(0,Math.min(24,labelGap)):DEFAULT_WIRE_STYLE.gap,
+      routeGap:Number.isFinite(routeGap)?Math.max(0,Math.min(20,routeGap)):DEFAULT_WIRE_STYLE.routeGap,
+      cornerRadius:Number.isFinite(cornerRadius)?Math.max(0,Math.min(24,cornerRadius)):DEFAULT_WIRE_STYLE.cornerRadius,
       showFromLabels:configured.showFromLabels!==false,
       showToLabels:configured.showToLabels!==false
     };
+  }
+  function updateAssemblyWireDefaults(changes) {
+    const defaults=assemblyWireDefaults();
+    state.assembly.wireDefaults={width:defaults.width,labelGap:defaults.gap,routeGap:defaults.routeGap,cornerRadius:defaults.cornerRadius,showFromLabels:defaults.showFromLabels,showToLabels:defaults.showToLabels,...changes};
   }
   function signalWireStyle(signal) {
     const defaults=assemblyWireDefaults(),configured=signal?.style||{};
     return {
       width:Math.max(1,Math.min(8,Number(configured.width)||defaults.width)),
       gap:defaults.gap,
+      cornerRadius:typeof configured.cornerRadius==='number'?Math.max(0,Math.min(24,configured.cornerRadius)):defaults.cornerRadius,
       showFromLabels:typeof configured.showFromLabels==='boolean'?configured.showFromLabels:defaults.showFromLabels,
       showToLabels:typeof configured.showToLabels==='boolean'?configured.showToLabels:defaults.showToLabels
     };
+  }
+  function connectionWireGap(connection) {
+    const configured=Number(connection?.gap);
+    return Number.isFinite(configured)&&configured>=0&&configured<=20?configured:assemblyWireDefaults().routeGap;
+  }
+  function interfaceLabelGap(node,interfaceId) {
+    const configured=Number(node?.interfaceLabelGaps?.[interfaceId]??node?.interfaceSignalGaps?.[interfaceId]);
+    return Number.isFinite(configured)&&configured>=0&&configured<=24?configured:assemblyWireDefaults().gap;
+  }
+  function assemblyCanvasSize() {
+    const configured=state.assembly.canvasSize||{};
+    return {width:Math.max(600,Math.min(3000,Number(configured.width)||1200)),height:Math.max(400,Math.min(2000,Number(configured.height)||800))};
   }
 
   function switchView(view) {
@@ -449,6 +473,7 @@
 
   function toAssemblyDocument() {
     const boards=[...new Set(state.assembly.nodes.map(n=>n.boardId))].map(id=>state.boards.find(b=>b.id===id)).filter(Boolean);
+    const wireDefaults=assemblyWireDefaults();
     return {
       schema:ASSEMBLY_SCHEMA_ID,
       schemaVersion:'1.2.0',
@@ -458,11 +483,13 @@
       name:state.assembly.name,
       description:state.assembly.description||'',
       layout:{origin:'top-left',axisX:'right',axisY:'down',unit:'diagram-px',routing:'hybrid'},
-      wireDefaults:assemblyWireDefaults(),
-      nodes:state.assembly.nodes.map(node=>({id:node.id,boardId:node.boardId,label:node.label,x:node.x,y:node.y,rotation:nodeRotation(node),flipX:nodeFlipX(node),scale:nodeScale(node)})),
+      canvasSize:assemblyCanvasSize(),
+      wireDefaults:{width:wireDefaults.width,labelGap:wireDefaults.gap,routeGap:wireDefaults.routeGap,cornerRadius:wireDefaults.cornerRadius,showFromLabels:wireDefaults.showFromLabels,showToLabels:wireDefaults.showToLabels},
+      nodes:state.assembly.nodes.map(node=>{const labelGaps=node.interfaceLabelGaps||node.interfaceSignalGaps;return {id:node.id,boardId:node.boardId,label:node.label,x:node.x,y:node.y,rotation:nodeRotation(node),flipX:nodeFlipX(node),scale:nodeScale(node),fixed:nodeFixed(node),...(labelGaps?{interfaceLabelGaps:{...labelGaps}}:{})};}),
       connections:state.assembly.connections.map(connection=>({
         id:connection.id,
         description:connection.description||'',
+        ...(connection.gap==null?{}:{gap:connectionWireGap(connection)}),
         from:{nodeId:connection.from.nodeId,interfaceId:connection.from.interfaceId},
         to:{nodeId:connection.to.nodeId,interfaceId:connection.to.interfaceId},
         pinMap:(connection.pinMap||[]).map(pair=>({
@@ -511,9 +538,12 @@
 
   function renderAssembly() {
     $('#assemblyName').value = state.assembly.name;
-    const layer = $('#nodeLayer');
+    const canvas=$('#assemblyCanvas'),canvasSize=assemblyCanvasSize(),layer = $('#nodeLayer'),wireLayer=$('#wireLayer');
+    canvas.style.width=`${canvasSize.width*zoom}px`;canvas.style.height=`${canvasSize.height*zoom}px`;canvas.style.backgroundSize=`${18*zoom}px ${18*zoom}px`;
+    layer.style.width=`${canvasSize.width}px`;layer.style.height=`${canvasSize.height}px`;
+    wireLayer.setAttribute('width',canvasSize.width);wireLayer.setAttribute('height',canvasSize.height);
     layer.style.transform = `scale(${zoom})`;
-    $('#wireLayer').style.transform = `scale(${zoom})`;
+    wireLayer.style.transform = `scale(${zoom})`;
     layer.innerHTML = state.assembly.nodes.map(node => {
       const board = state.boards.find(b => b.id === node.boardId);
       if (!board) return '';
@@ -526,10 +556,12 @@
       const source=geometry.source,rotation=nodeRotation(node),scaleX=nodeFlipX(node)?-1:1;
       const imageSource=board.source==='generated'?placeholderSvg('',board.generated?.width,board.generated?.height,board.generated?.color):board.image;
       const generatedName=board.source==='generated'?`<span class="generated-node-name" style="left:${geometry.centerX}px;top:${geometry.centerY}px">${escapeHtml(board.name)}</span>`:'';
-      return `<article class="board-node ${node.id===selectedNodeId?'selected':''}" data-id="${node.id}" style="left:${node.x}px;top:${node.y}px"><div class="node-body">${imageSource?`<img src="${imageSource}" data-board="${board.id}" alt="" style="left:${source.x}px;top:${source.y}px;width:${source.width}px;height:${source.height}px;transform:rotate(${rotation}deg) scaleX(${scaleX});transform-origin:center">`:`<div class="node-placeholder" style="transform:rotate(${rotation}deg) scaleX(${scaleX})"></div>`}${generatedName}</div><footer class="node-header"><strong>${escapeHtml(node.label)}</strong><button class="node-action node-scale-down" title="缩小板卡">−</button><span class="node-scale-label">${Math.round(nodeScale(node)*100)}%</span><button class="node-action node-scale-up" title="放大板卡">＋</button><button class="node-action node-flip" title="水平翻转">⇆</button><button class="node-action node-rotate" title="顺时针旋转 90°">↻</button><button class="node-action node-remove" title="移除板卡">×</button></footer>${ports}</article>`;
+      return `<article class="board-node ${node.id===selectedNodeId?'selected':''} ${nodeFixed(node)?'fixed':''}" data-id="${node.id}" style="left:${node.x}px;top:${node.y}px"><div class="node-body">${imageSource?`<img src="${imageSource}" data-board="${board.id}" alt="" style="left:${source.x}px;top:${source.y}px;width:${source.width}px;height:${source.height}px;transform:rotate(${rotation}deg) scaleX(${scaleX});transform-origin:center">`:`<div class="node-placeholder" style="transform:rotate(${rotation}deg) scaleX(${scaleX})"></div>`}${generatedName}</div><footer class="node-header"><strong>${nodeFixed(node)?'<span class="node-fixed-mark" title="位置已固定">◆</span> ':''}${escapeHtml(node.label)}</strong><button class="node-action node-scale-down" title="缩小板卡">−</button><span class="node-scale-label">${Math.round(nodeScale(node)*100)}%</span><button class="node-action node-scale-up" title="放大板卡">＋</button><button class="node-action node-flip" title="水平翻转">⇆</button><button class="node-action node-rotate" title="顺时针旋转 90°">↻</button><button class="node-action node-remove" title="移除板卡">×</button></footer>${ports}</article>`;
     }).join('');
     $$('.board-node').forEach(nodeEl => {
-      nodeEl.onpointerdown = e => { selectedNodeId = nodeEl.dataset.id; selectedWireId = null;selectedWirePinKey=null; if (!e.target.closest('.node-port,.node-action')) startNodeDrag(e, nodeEl.dataset.id); renderSelection(); };
+      const selectNode=()=>{selectedNodeId=nodeEl.dataset.id;selectedWireId=null;selectedWirePinKey=null;renderSelection();};
+      nodeEl.onpointerdown = e => { if(e.button!==0)return;selectNode();const node=state.assembly.nodes.find(item=>item.id===nodeEl.dataset.id);if (!nodeFixed(node)&&!e.target.closest('.node-port,.node-action')) startNodeDrag(e,nodeEl.dataset.id); };
+      nodeEl.onclick = e => {if(!e.target.closest('.node-port,.node-action'))selectNode();};
       $('.node-scale-down', nodeEl).onclick = e => { e.stopPropagation(); resizeNode(nodeEl.dataset.id,-.1); };
       $('.node-scale-up', nodeEl).onclick = e => { e.stopPropagation(); resizeNode(nodeEl.dataset.id,.1); };
       $('.node-flip', nodeEl).onclick = e => { e.stopPropagation(); flipNode(nodeEl.dataset.id); };
@@ -564,6 +596,17 @@
     renderAssemblyProperties();
   }
 
+  function setAssemblyZoom(nextZoom,clientX,clientY) {
+    const viewport=$('#assemblyViewport'),rect=viewport.getBoundingClientRect();
+    const cursorX=clientX==null?viewport.clientWidth/2:clientX-rect.left;
+    const cursorY=clientY==null?viewport.clientHeight/2:clientY-rect.top;
+    const logicalX=(viewport.scrollLeft+cursorX)/zoom,logicalY=(viewport.scrollTop+cursorY)/zoom;
+    zoom=Math.max(.4,Math.min(1.5,nextZoom));
+    renderAssembly();
+    viewport.scrollLeft=logicalX*zoom-cursorX;
+    viewport.scrollTop=logicalY*zoom-cursorY;
+  }
+
   function wirePinKey(pair) { return `${pair.from}:${pair.to}`; }
 
   function selectedSignal() {
@@ -582,19 +625,43 @@
   }
 
   function renderAssemblyProperties() {
-    const defaults=assemblyWireDefaults();
+    const defaults=assemblyWireDefaults(),canvasSize=assemblyCanvasSize();
     $('#defaultWireWidth').value=defaults.width;
+    $('#defaultWireWidthValue').value=defaults.width.toFixed(1);
     $('#defaultWireGap').value=defaults.gap;
+    $('#defaultWireGapValue').value=defaults.gap;
+    $('#defaultRouteGap').value=defaults.routeGap;
+    $('#defaultRouteGapValue').value=defaults.routeGap;
+    $('#defaultCornerRadius').value=defaults.cornerRadius;
+    $('#defaultCornerRadiusValue').value=defaults.cornerRadius;
+    $('#canvasWidth').value=canvasSize.width;
+    $('#canvasWidthValue').value=canvasSize.width;
+    $('#canvasHeight').value=canvasSize.height;
+    $('#canvasHeightValue').value=canvasSize.height;
     $('#defaultShowFromLabels').checked=defaults.showFromLabels;
     $('#defaultShowToLabels').checked=defaults.showToLabels;
-    const selected=selectedSignal();
-    $('#wirePropertyEmpty').classList.toggle('hidden',!!selected);
-    $('#wirePropertyForm').classList.toggle('hidden',!selected);
+    const node=state.assembly.nodes.find(item=>item.id===selectedNodeId),board=state.boards.find(item=>item.id===node?.boardId);
+    const selected=selectedSignal(),hasNode=!!node&&!!board,hasSignal=!!selected;
+    $('#globalPropertyGroup').classList.toggle('hidden',hasNode||hasSignal);
+    $('#nodePropertyGroup').classList.toggle('hidden',!hasNode);
+    $('#wirePropertyGroup').classList.toggle('hidden',!hasSignal);
+    $('#assemblyPropertyTitle').textContent=hasSignal?'信号线属性':hasNode?'板卡属性':'全局属性';
+    if(node&&board){
+      $('#nodePropertySummary').textContent=node.label;
+      $('#nodeFixed').checked=nodeFixed(node);
+      $('#nodeInterfaceGaps').innerHTML=board.interfaces.map(intf=>{const override=node.interfaceLabelGaps?.[intf.id]??node.interfaceSignalGaps?.[intf.id],value=override??defaults.gap;return `<div class="interface-gap-row"><span title="${escapeHtml(intf.name)}">${escapeHtml(intf.name)} · ${intf.pins.length}P</span><input type="range" min="0" max="24" step="1" value="${value}" data-interface="${intf.id}" aria-label="${escapeHtml(intf.name)} 信号标签间距"><output>${value}</output><button type="button" class="interface-gap-reset" data-reset-interface="${intf.id}" title="恢复全局 ${defaults.gap}" ${override==null?'disabled':''}>↺</button></div>`;}).join('')||'<div class="compact-empty">此板卡没有接口</div>';
+    }
     if(!selected)return;
     const {signal,from,to}=selected,style=signalWireStyle(signal);
     $('#wireEndpointSummary').innerHTML=`<b>端点 1</b> ${escapeHtml(from.node?.label||'未知板卡')} / ${escapeHtml(from.intf?.name||'未知接口')} / ${escapeHtml(signal.fromName)}<br><b>端点 2</b> ${escapeHtml(to.node?.label||'未知板卡')} / ${escapeHtml(to.intf?.name||'未知接口')} / ${escapeHtml(signal.toName)}`;
     $('#wireDisplayName').value=signal.label||'';
-    $('#wireWidth').value=signal.style?.width??'';
+    $('#wireWidth').value=style.width;
+    $('#wireWidthValue').value=style.width.toFixed(1);
+    $('#wireCornerRadius').value=style.cornerRadius;
+    $('#wireCornerRadiusValue').value=style.cornerRadius;
+    const routeGap=connectionWireGap(selected.connection);
+    $('#wireRouteGap').value=routeGap;
+    $('#wireRouteGapValue').value=routeGap;
     $('#wireShowFromLabels').checked=style.showFromLabels;
     $('#wireShowToLabels').checked=style.showToLabels;
   }
@@ -668,19 +735,20 @@
   function displayPinName(label){const value=String(label);const generic=value.match(/^Pin\s*(\d+)$/i);return generic?`P${generic[1]}`:value;}
   function pinTagWidth(label){return Math.max(15,Math.min(46,displayPinName(label).length*4.5+6));}
 
-  function interfaceEdgeSpan(board,intf,node,base) {
+  function interfaceEdgeGeometry(board,intf,node,base) {
     const first=base.side==='left'?{x:0,y:intf.rect.y}:base.side==='right'?{x:1,y:intf.rect.y}:base.side==='top'?{x:intf.rect.x,y:0}:{x:intf.rect.x,y:1};
     const last=base.side==='left'?{x:0,y:intf.rect.y+intf.rect.h}:base.side==='right'?{x:1,y:intf.rect.y+intf.rect.h}:base.side==='top'?{x:intf.rect.x+intf.rect.w,y:0}:{x:intf.rect.x+intf.rect.w,y:1};
     const a=pointOnOriginalBoard(board,node,first.x,first.y),b=pointOnOriginalBoard(board,node,last.x,last.y);
-    return Math.max(1,Math.hypot(b.x-a.x,b.y-a.y));
+    const span=Math.max(1,Math.hypot(b.x-a.x,b.y-a.y));
+    return {span,dx:(b.x-a.x)/span,dy:(b.y-a.y)/span};
   }
 
   function boardTerminalLayout(board,node) {
     const result=new Map();
     board.interfaces.forEach(intf=>{
       const anchor=getInterfaceAnchor(board,intf,node),base=baseInterfaceSide(intf.rect),count=Math.max(1,intf.pins.length);
-      const span=interfaceEdgeSpan(board,intf,node,base),slot=span/count;
-      const horizontalTotal=intf.pins.reduce((sum,pin)=>sum+pinTagWidth(pin),0)+Math.max(0,count-1)*1.5;
+      const edge=interfaceEdgeGeometry(board,intf,node,base),span=edge.span,slot=span/count,labelGap=interfaceLabelGap(node,intf.id);
+      const horizontalTotal=intf.pins.reduce((sum,pin)=>sum+pinTagWidth(pin),0)+Math.max(0,count-1)*labelGap;
       const tagVertical=(anchor.side==='top'||anchor.side==='bottom')&&horizontalTotal>span;
       const tagThickness=tagVertical?Math.max(5,Math.min(10,slot-1)):anchor.side==='left'||anchor.side==='right'?Math.max(6,Math.min(12,slot-1)):12;
       intf.pins.forEach((pin,index)=>{
@@ -690,7 +758,8 @@
         const ratio=(physicalIndex+.5)/count;
         const normalized=base.side==='left'?{x:0,y:intf.rect.y+ratio*intf.rect.h}:base.side==='right'?{x:1,y:intf.rect.y+ratio*intf.rect.h}:base.side==='top'?{x:intf.rect.x+ratio*intf.rect.w,y:0}:{x:intf.rect.x+ratio*intf.rect.w,y:1};
         const point=pointOnOriginalBoard(board,node,normalized.x,normalized.y);
-        result.set(`${intf.id}:${index+1}`,{...anchor,...point,tagVertical,tagThickness});
+        const tagShift=(physicalIndex-(count-1)/2)*labelGap;
+        result.set(`${intf.id}:${index+1}`,{...anchor,...point,tagX:point.x+edge.dx*tagShift,tagY:point.y+edge.dy*tagShift,tagVertical,tagThickness});
       });
     });
     return result;
@@ -733,11 +802,12 @@
   function pinTagMarkup(point,label,color) {
     const labelWidth=pinTagWidth(label),thickness=point.tagThickness||12;
     const width=point.tagVertical?thickness:labelWidth,height=point.tagVertical?labelWidth:thickness;
-    let x=point.x-width/2,y=point.y-height/2;
-    if(point.dx>0)x=point.x+3;
-    if(point.dx<0)x=point.x-width-3;
-    if(point.dy>0)y=point.y+3;
-    if(point.dy<0)y=point.y-height-3;
+    const tagX=point.tagX??point.x,tagY=point.tagY??point.y;
+    let x=tagX-width/2,y=tagY-height/2;
+    if(point.dx>0)x=tagX+3;
+    if(point.dx<0)x=tagX-width-3;
+    if(point.dy>0)y=tagY+3;
+    if(point.dy<0)y=tagY-height-3;
     const textColor=['#17191d','#4c95d9','#55ad55','#a85ac4'].includes(color)?'#fff':'#172235';
     const centerX=x+width/2,centerY=y+height/2,fontSize=Math.max(5.5,Math.min(7,thickness*.72));
     const transform=point.tagVertical?` transform="rotate(-90 ${centerX} ${centerY})"`:'';
@@ -773,7 +843,7 @@
     if (!node || !intf) return null;
     const anchor = pinNumber?getPinAnchor(board,intf,pinNumber,node):getInterfaceAnchor(board,intf,node);
     const image=getBoardImageGeometry(board,node).bounds;
-    return {...anchor,x:node.x+anchor.x,y:node.y+anchor.y,box:{left:node.x+image.x,top:node.y+image.y,right:node.x+image.x+image.width,bottom:node.y+image.y+image.height}};
+    return {...anchor,x:node.x+anchor.x,y:node.y+anchor.y,...(anchor.tagX==null?{}:{tagX:node.x+anchor.tagX,tagY:node.y+anchor.tagY}),box:{left:node.x+image.x,top:node.y+image.y,right:node.x+image.x+image.width,bottom:node.y+image.y+image.height}};
   }
 
   function routingObstacles() {
@@ -816,11 +886,11 @@
     });
   }
 
-  function routePath(a,b,laneOffset=0) {
-    const lead=30,obstacles=routingObstacles();
-    const al={x:a.x+a.dx*lead,y:a.y+a.dy*lead},bl={x:b.x+b.dx*lead,y:b.y+b.dy*lead};
-    const start={x:al.x+(a.dy?laneOffset:0),y:al.y+(a.dx?laneOffset:0)};
-    const goal={x:bl.x+(b.dy?laneOffset:0),y:bl.y+(b.dx?laneOffset:0)};
+  function routePath(a,b,laneOffset=0,bundleA=a,bundleB=b) {
+    const nearLead=8,routeLead=30,obstacles=routingObstacles();
+    const al={x:a.x+a.dx*nearLead,y:a.y+a.dy*nearLead},bl={x:b.x+b.dx*nearLead,y:b.y+b.dy*nearLead};
+    const start={x:bundleA.x+bundleA.dx*routeLead+(bundleA.dy?laneOffset:0),y:bundleA.y+bundleA.dy*routeLead+(bundleA.dx?laneOffset:0)};
+    const goal={x:bundleB.x+bundleB.dx*routeLead+(bundleB.dy?laneOffset:0),y:bundleB.y+bundleB.dy*routeLead+(bundleB.dx?laneOffset:0)};
     const mixedAxes=(a.dx!==0&&b.dy!==0)||(a.dy!==0&&b.dx!==0);
     const verticalSideBySide=a.dy!==0&&b.dy!==0&&a.dy!==b.dy&&Math.abs(start.x-goal.x)>Math.abs(start.y-goal.y);
     const horizontalStacked=a.dx!==0&&b.dx!==0&&a.dx!==b.dx&&Math.abs(start.y-goal.y)>Math.abs(start.x-goal.x);
@@ -836,8 +906,8 @@
     };
     add([start,{x:goal.x,y:start.y},goal]);
     add([start,{x:start.x,y:goal.y},goal]);
-    const channelXs=[(start.x+goal.x)/2+laneOffset,...obstacles.flatMap(box=>[box.left-40-laneOffset,box.right+40+laneOffset])];
-    const channelYs=[(start.y+goal.y)/2+laneOffset,...obstacles.flatMap(box=>[box.top-40-laneOffset,box.bottom+40+laneOffset])];
+    const channelXs=[(start.x+goal.x)/2+laneOffset,...obstacles.flatMap(box=>[box.left-40+laneOffset,box.right+40+laneOffset])];
+    const channelYs=[(start.y+goal.y)/2+laneOffset,...obstacles.flatMap(box=>[box.top-40+laneOffset,box.bottom+40+laneOffset])];
     channelXs.forEach(x=>add([start,{x,y:start.y},{x,y:goal.y},goal]));
     channelYs.forEach(y=>add([start,{x:start.x,y},{x:goal.x,y},goal]));
     const cost=points=>{
@@ -852,13 +922,34 @@
     return points.map((point,index)=>`${index?'L':'M'}${point.x},${point.y}`).join(' ');
   }
 
+  function roundedPath(path,radius) {
+    const amount=Math.max(0,Math.min(24,Number(radius)||0));if(!amount)return path;
+    const values=(path.match(/-?\d+(?:\.\d+)?/g)||[]).map(Number),points=[];
+    for(let index=0;index<values.length;index+=2)points.push({x:values[index],y:values[index+1]});
+    if(points.length<3)return path;
+    const value=number=>Math.round(number*100)/100;
+    let result=`M${value(points[0].x)},${value(points[0].y)}`;
+    for(let index=1;index<points.length-1;index++){
+      const previous=points[index-1],corner=points[index],next=points[index+1];
+      const previousLength=Math.hypot(corner.x-previous.x,corner.y-previous.y),nextLength=Math.hypot(next.x-corner.x,next.y-corner.y);
+      const applied=Math.min(amount,previousLength/2,nextLength/2);
+      if(applied<.01){result+=` L${value(corner.x)},${value(corner.y)}`;continue;}
+      const before={x:corner.x+(previous.x-corner.x)*applied/previousLength,y:corner.y+(previous.y-corner.y)*applied/previousLength};
+      const after={x:corner.x+(next.x-corner.x)*applied/nextLength,y:corner.y+(next.y-corner.y)*applied/nextLength};
+      result+=` L${value(before.x)},${value(before.y)} Q${value(corner.x)},${value(corner.y)} ${value(after.x)},${value(after.y)}`;
+    }
+    const last=points.at(-1);
+    return `${result} L${value(last.x)},${value(last.y)}`;
+  }
+
   function renderWires() {
     $('#wireLayer').innerHTML = state.assembly.connections.map(c => {
       const from=endpointDetails(c.from),to=endpointDetails(c.to);if(!from.intf||!to.intf)return '';
-      const pairs=connectionPinPairs(c,from.intf,to.intf),gap=assemblyWireDefaults().gap;
+      const pairs=connectionPinPairs(c,from.intf,to.intf),bundleA=portPoint(c.from),bundleB=portPoint(c.to);
       const lines=pairs.map((pair,index)=>{
         const a=portPoint(c.from,pair.from),b=portPoint(c.to,pair.to);if(!a||!b)return '';
-        const d=routePath(a,b,(index-(pairs.length-1)/2)*gap),style=signalWireStyle(pair),pinKey=wirePinKey(pair);
+        const centeredIndex=index-(pairs.length-1)/2;
+        const style=signalWireStyle(pair),d=roundedPath(routePath(a,b,centeredIndex*connectionWireGap(c),bundleA,bundleB),style.cornerRadius),pinKey=wirePinKey(pair);
         const selected=c.id===selectedWireId&&pinKey===selectedWirePinKey?'selected':'';
         return `<g class="signal-wire ${selected}" data-pin-key="${pinKey}" style="--wire-width:${style.width}px;--wire-outline-width:${style.width+2.8}px"><path class="wire-hit" d="${d}"/><path class="wire-outline" d="${d}"/><path class="wire-path" d="${d}" stroke="${pair.color}"/>${style.showFromLabels?pinTagMarkup(a,pair.fromName,pair.color):''}${style.showToLabels?pinTagMarkup(b,pair.toName,pair.color):''}${wireMiddleLabelMarkup(pair.label,d)}</g>`;
       }).join('');
@@ -880,7 +971,7 @@
     const el=$(`.board-node[data-id="${dragState.node.id}"]`); if(el) {el.style.left=`${dragState.node.x}px`;el.style.top=`${dragState.node.y}px`;}
     renderWires();
   }
-  function endNodeDrag() { if(dragState){dragState=null;saveState();} }
+  function endNodeDrag() { if(dragState){dragState=null;ignoreCanvasClickUntil=performance.now()+150;saveState();} }
 
   function selectPort(nodeId, interfaceId) {
     if (!pendingPort) { pendingPort={nodeId,interfaceId}; toast('已选择起点，请点击另一个接口'); renderAssembly(); return; }
@@ -923,6 +1014,8 @@
 
   function autoLayout() {
     const nodes=state.assembly.nodes; if(!nodes.length)return;
+    const movableNodes=nodes.filter(node=>!nodeFixed(node)),fixedCount=nodes.length-movableNodes.length;
+    if(!movableNodes.length)return toast('所有板卡均已固定，布局未改变');
     const largestScale=Math.max(1,...nodes.map(node=>nodeScale(node)));
     const spacingX=255+(largestScale-1)*210,spacingY=210+(largestScale-1)*175;
     const degree=new Map(nodes.map(n=>[n.id,0])),adjacency=new Map(nodes.map(n=>[n.id,[]]));
@@ -935,11 +1028,12 @@
     });
     const hub=[...nodes].sort((a,b)=>degree.get(b.id)-degree.get(a.id))[0];
     if(!degree.get(hub.id)){
-      nodes.forEach((node,index)=>{node.x=70+(index%4)*spacingX;node.y=70+Math.floor(index/4)*spacingY;});
+      movableNodes.forEach((node,index)=>{node.x=70+(index%4)*spacingX;node.y=70+Math.floor(index/4)*spacingY;});
     } else {
       const canvas=$('#assemblyCanvas'),logicalWidth=canvas.clientWidth/zoom,logicalHeight=canvas.clientHeight/zoom;
-      const centerX=Math.max(380,logicalWidth/2)-NODE.width/2,centerY=Math.max(290,logicalHeight/2)-NODE.height/2;
-      hub.x=centerX;hub.y=centerY;
+      const desiredCenterX=Math.max(380,logicalWidth/2)-NODE.width/2,desiredCenterY=Math.max(290,logicalHeight/2)-NODE.height/2;
+      const centerX=nodeFixed(hub)?hub.x:desiredCenterX,centerY=nodeFixed(hub)?hub.y:desiredCenterY;
+      if(!nodeFixed(hub)){hub.x=centerX;hub.y=centerY;}
       const groups={top:[],right:[],bottom:[],left:[]},seen=new Set([hub.id]);
       adjacency.get(hub.id).forEach(link=>{
         if(seen.has(link.nodeId))return;seen.add(link.nodeId);
@@ -947,20 +1041,20 @@
         const side=intf?getInterfaceAnchor(board,intf,node).side:'bottom';
         groups[side].push(nodes.find(n=>n.id===link.nodeId));
       });
-      const placeRow=(group,y)=>group.forEach((node,index)=>{node.x=centerX+(index-(group.length-1)/2)*(spacingX+45);node.y=y;});
-      const placeColumn=(group,x)=>group.forEach((node,index)=>{node.x=x;node.y=centerY+(index-(group.length-1)/2)*(spacingY+40);});
+      const placeRow=(group,y)=>{const movable=group.filter(node=>!nodeFixed(node));movable.forEach((node,index)=>{node.x=centerX+(index-(movable.length-1)/2)*(spacingX+45);node.y=y;});};
+      const placeColumn=(group,x)=>{const movable=group.filter(node=>!nodeFixed(node));movable.forEach((node,index)=>{node.x=x;node.y=centerY+(index-(movable.length-1)/2)*(spacingY+40);});};
       const radialY=280+(largestScale-1)*175,radialX=370+(largestScale-1)*210;
       placeRow(groups.top,centerY-radialY);placeRow(groups.bottom,centerY+radialY);
       placeColumn(groups.left,centerX-radialX);placeColumn(groups.right,centerX+radialX);
-      const remaining=nodes.filter(n=>!seen.has(n.id));
+      const remaining=nodes.filter(n=>!seen.has(n.id)&&!nodeFixed(n));
       const lowest=Math.max(centerY+radialY,...nodes.filter(n=>seen.has(n.id)).map(n=>n.y));
       remaining.forEach((node,index)=>{node.x=centerX-spacingX+(index%3)*spacingX;node.y=lowest+spacingY+40+Math.floor(index/3)*spacingY;});
     }
-    nodes.forEach(node=>{const board=state.boards.find(item=>item.id===node.boardId),bounds=getBoardImageGeometry(board,node).bounds;node.x=Math.max(node.x,45-bounds.x);node.y=Math.max(node.y,45-bounds.y);});
+    movableNodes.forEach(node=>{const board=state.boards.find(item=>item.id===node.boardId),bounds=getBoardImageGeometry(board,node).bounds;node.x=Math.max(node.x,45-bounds.x);node.y=Math.max(node.y,45-bounds.y);});
     const maxX=Math.max(...nodes.map(node=>{const board=state.boards.find(item=>item.id===node.boardId),bounds=getBoardImageGeometry(board,node).bounds;return node.x+bounds.x+bounds.width;}));
     const maxY=Math.max(...nodes.map(node=>{const board=state.boards.find(item=>item.id===node.boardId),bounds=getBoardImageGeometry(board,node).bounds;return node.y+bounds.y+bounds.height;}));
     const canvas=$('#assemblyCanvas');zoom=Math.max(.4,Math.min(1,(canvas.clientWidth-40)/maxX,(canvas.clientHeight-40)/maxY));
-    saveState();renderAssembly();toast('已按接线图方式排列：主控居中，外设环绕');
+    saveState();renderAssembly();toast(fixedCount?`已自动布局；保留 ${fixedCount} 块固定板卡位置`:'已按接线图方式排列：主控居中，外设环绕');
   }
 
   function ensureBoardImageSize(board) {
@@ -987,10 +1081,12 @@
     const nodes = state.assembly.nodes;
     const exportWireData=state.assembly.connections.flatMap(connection=>{
       const from=endpointDetails(connection.from),to=endpointDetails(connection.to);if(!from.intf||!to.intf)return [];
-      const pairs=connectionPinPairs(connection,from.intf,to.intf),gap=assemblyWireDefaults().gap;
+      const pairs=connectionPinPairs(connection,from.intf,to.intf),bundleA=portPoint(connection.from),bundleB=portPoint(connection.to);
       return pairs.map((pair,index)=>{
         const a=portPoint(connection.from,pair.from),b=portPoint(connection.to,pair.to);
-        return a&&b?{connection,pair,a,b,style:signalWireStyle(pair),index,d:routePath(a,b,(index-(pairs.length-1)/2)*gap)}:null;
+        const centeredIndex=index-(pairs.length-1)/2;
+        const style=signalWireStyle(pair);
+        return a&&b?{connection,pair,a,b,style,index,d:roundedPath(routePath(a,b,centeredIndex*connectionWireGap(connection),bundleA,bundleB),style.cornerRadius)}:null;
       }).filter(Boolean);
     });
     const visualBounds=nodes.map(node=>{
@@ -1116,20 +1212,32 @@
     $('#autoLayoutBtn').onclick=autoLayout;$('#renderAssemblyBtn').onclick=renderAssemblyImage;$('#exportAssemblyBtn').onclick=exportAssembly;
     $('#clearAssemblyBtn').onclick=()=>{if(!state.assembly.nodes.length||confirm('确定清空当前装配画布吗？')){state.assembly.nodes=[];state.assembly.connections=[];selectedNodeId=null;selectedWireId=null;selectedWirePinKey=null;saveState();renderAssembly();}};
     $('#importAssemblyBtn').onclick=()=>$('#importAssemblyInput').click();$('#importAssemblyInput').onchange=e=>{if(e.target.files[0])importAssembly(e.target.files[0]);e.target.value='';};
-    $('#defaultWireWidth').onchange=e=>{const defaults=assemblyWireDefaults();state.assembly.wireDefaults={...defaults,width:Math.max(1,Math.min(8,+e.target.value||DEFAULT_WIRE_STYLE.width))};saveState();renderAssemblyProperties();renderWires();};
-    $('#defaultWireGap').onchange=e=>{const defaults=assemblyWireDefaults();state.assembly.wireDefaults={...defaults,gap:Math.max(2,Math.min(16,+e.target.value||DEFAULT_WIRE_STYLE.gap))};saveState();renderAssemblyProperties();renderWires();};
-    $('#defaultShowFromLabels').onchange=e=>{state.assembly.wireDefaults={...assemblyWireDefaults(),showFromLabels:e.target.checked};saveState();renderAssemblyProperties();renderWires();};
-    $('#defaultShowToLabels').onchange=e=>{state.assembly.wireDefaults={...assemblyWireDefaults(),showToLabels:e.target.checked};saveState();renderAssemblyProperties();renderWires();};
+    $('#defaultWireWidth').oninput=e=>{const value=Math.max(1,Math.min(8,+e.target.value||DEFAULT_WIRE_STYLE.width));updateAssemblyWireDefaults({width:value});$('#defaultWireWidthValue').value=value.toFixed(1);saveState();renderWires();};
+    $('#defaultWireGap').oninput=e=>{const value=Math.max(0,Math.min(24,Number(e.target.value)||0));updateAssemblyWireDefaults({labelGap:value});$('#defaultWireGapValue').value=value;saveState();renderWires();};
+    $('#defaultRouteGap').oninput=e=>{const value=Math.max(0,Math.min(20,Number(e.target.value)));updateAssemblyWireDefaults({routeGap:value});$('#defaultRouteGapValue').value=value;saveState();renderWires();};
+    $('#defaultCornerRadius').oninput=e=>{const value=Math.max(0,Math.min(24,Number(e.target.value)));updateAssemblyWireDefaults({cornerRadius:value});$('#defaultCornerRadiusValue').value=value;saveState();renderWires();};
+    $('#canvasWidth').oninput=e=>{const size=assemblyCanvasSize();state.assembly.canvasSize={...size,width:+e.target.value};$('#canvasWidthValue').value=e.target.value;saveState();renderAssembly();};
+    $('#canvasHeight').oninput=e=>{const size=assemblyCanvasSize();state.assembly.canvasSize={...size,height:+e.target.value};$('#canvasHeightValue').value=e.target.value;saveState();renderAssembly();};
+    $('#defaultShowFromLabels').onchange=e=>{updateAssemblyWireDefaults({showFromLabels:e.target.checked});saveState();renderAssemblyProperties();renderWires();};
+    $('#defaultShowToLabels').onchange=e=>{updateAssemblyWireDefaults({showToLabels:e.target.checked});saveState();renderAssemblyProperties();renderWires();};
+    $('#nodeInterfaceGaps').oninput=e=>{const input=e.target.closest('input[data-interface]'),node=state.assembly.nodes.find(item=>item.id===selectedNodeId);if(!input||!node)return;node.interfaceLabelGaps=node.interfaceLabelGaps||{};node.interfaceLabelGaps[input.dataset.interface]=Math.max(0,Math.min(24,Number(input.value)||0));delete node.interfaceSignalGaps;const output=input.nextElementSibling;if(output)output.value=input.value;const reset=input.parentElement.querySelector('.interface-gap-reset');if(reset)reset.disabled=false;saveState();renderWires();};
+    $('#nodeInterfaceGaps').onclick=e=>{const button=e.target.closest('[data-reset-interface]'),node=state.assembly.nodes.find(item=>item.id===selectedNodeId);if(!button||!node)return;delete node.interfaceLabelGaps?.[button.dataset.resetInterface];delete node.interfaceSignalGaps?.[button.dataset.resetInterface];if(node.interfaceLabelGaps&&!Object.keys(node.interfaceLabelGaps).length)delete node.interfaceLabelGaps;if(node.interfaceSignalGaps&&!Object.keys(node.interfaceSignalGaps).length)delete node.interfaceSignalGaps;saveState();renderAssemblyProperties();renderWires();};
+    $('#resetNodeGapsBtn').onclick=()=>{const node=state.assembly.nodes.find(item=>item.id===selectedNodeId);if(!node)return;delete node.interfaceLabelGaps;delete node.interfaceSignalGaps;saveState();renderAssemblyProperties();renderWires();};
+    $('#nodeFixed').onchange=e=>{const node=state.assembly.nodes.find(item=>item.id===selectedNodeId);if(!node)return;node.fixed=e.target.checked;saveState();renderAssembly();toast(node.fixed?'板卡位置已固定':'板卡位置已解除固定');};
     $('#wireDisplayName').oninput=e=>{const signal=editableSelectedSignal();if(!signal)return;signal.label=e.target.value;saveState();renderWires();};
-    $('#wireWidth').onchange=e=>{const signal=editableSelectedSignal();if(!signal)return;signal.style=signal.style||{};if(e.target.value==='')delete signal.style.width;else signal.style.width=Math.max(1,Math.min(8,+e.target.value||assemblyWireDefaults().width));saveState();renderAssemblyProperties();renderWires();};
+    $('#wireWidth').oninput=e=>{const signal=editableSelectedSignal();if(!signal)return;signal.style=signal.style||{};signal.style.width=Math.max(1,Math.min(8,+e.target.value||assemblyWireDefaults().width));$('#wireWidthValue').value=signal.style.width.toFixed(1);saveState();renderWires();};
+    $('#wireCornerRadius').oninput=e=>{const signal=editableSelectedSignal();if(!signal)return;signal.style=signal.style||{};signal.style.cornerRadius=Math.max(0,Math.min(24,Number(e.target.value)));$('#wireCornerRadiusValue').value=signal.style.cornerRadius;saveState();renderWires();};
+    $('#wireRouteGap').oninput=e=>{const selected=selectedSignal();if(!selected)return;selected.connection.gap=Math.max(0,Math.min(20,Number(e.target.value)));$('#wireRouteGapValue').value=selected.connection.gap;saveState();renderWires();};
+    $('#resetWireGapBtn').onclick=()=>{const selected=selectedSignal();if(!selected)return;delete selected.connection.gap;saveState();renderAssemblyProperties();renderWires();};
     $('#wireShowFromLabels').onchange=e=>{const signal=editableSelectedSignal();if(!signal)return;signal.style={...(signal.style||{}),showFromLabels:e.target.checked};saveState();renderWires();};
     $('#wireShowToLabels').onchange=e=>{const signal=editableSelectedSignal();if(!signal)return;signal.style={...(signal.style||{}),showToLabels:e.target.checked};saveState();renderWires();};
     $('#resetWireStyleBtn').onclick=()=>{const signal=editableSelectedSignal();if(!signal)return;delete signal.style;saveState();renderAssemblyProperties();renderWires();};
     $('#deleteWireBtn').onclick=deleteSelectedWire;
     const canvas=$('#assemblyCanvas');canvas.ondragover=e=>e.preventDefault();canvas.ondrop=e=>{e.preventDefault();const id=e.dataTransfer.getData('text/pcb-id'),r=canvas.getBoundingClientRect();if(id)addNode(id,{x:(e.clientX-r.left)/zoom-NODE.width/2,y:(e.clientY-r.top)/zoom-NODE.height/2});};
     canvas.onpointermove=moveNode;canvas.onpointerup=endNodeDrag;canvas.onpointercancel=endNodeDrag;
-    canvas.onclick=e=>{if(e.target===canvas||e.target.id==='nodeLayer'){selectedNodeId=null;selectedWireId=null;selectedWirePinKey=null;pendingPort=null;renderAssembly();}};
-    $('#zoomInBtn').onclick=()=>{zoom=Math.min(1.5,zoom+.1);renderAssembly();};$('#zoomOutBtn').onclick=()=>{zoom=Math.max(.4,zoom-.1);renderAssembly();};
+    canvas.onclick=e=>{if(performance.now()<ignoreCanvasClickUntil)return;if(e.target===canvas||e.target.id==='nodeLayer'){selectedNodeId=null;selectedWireId=null;selectedWirePinKey=null;pendingPort=null;renderAssembly();}};
+    $('#assemblyViewport').addEventListener('wheel',e=>{e.preventDefault();setAssemblyZoom(zoom*(e.deltaY<0?1.1:.9),e.clientX,e.clientY);},{passive:false});
+    $('#zoomInBtn').onclick=()=>setAssemblyZoom(zoom+.1);$('#zoomOutBtn').onclick=()=>setAssemblyZoom(zoom-.1);
     document.onkeydown=e=>{
       if(!$('#assemblyView').classList.contains('active')||['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName))return;
       if((e.key==='r'||e.key==='R')&&selectedNodeId){e.preventDefault();rotateNode(selectedNodeId);return;}

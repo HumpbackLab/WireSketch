@@ -138,7 +138,9 @@ main, .workspace { height: calc(100vh - 68px); }
 .property-group label { display: block; margin-bottom: 12px; color: #5d6a7f; font-size: 10px; font-weight: 700; }
 .property-group input[type="number"], #wireDisplayName { width: 100%; height: 35px; margin-top: 5px; padding: 0 9px; border: 1px solid #d9e0e8; border-radius: 6px; color: var(--ink); background: white; outline: none; }
 .property-group input:focus { border-color: #7ba2f6; box-shadow: 0 0 0 3px rgba(39,100,231,.08); }
-.compact-field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+.range-field > span { display: flex; align-items: center; justify-content: space-between; margin-bottom: 7px; }
+.range-field output { min-width: 38px; padding: 2px 6px; border-radius: 10px; background: var(--blue-soft); color: var(--blue); text-align: center; font: 750 9px ui-monospace, monospace; }
+.range-field input[type="range"] { display: block; width: 100%; height: 18px; margin: 0; padding: 0; border: 0; box-shadow: none; accent-color: var(--blue); cursor: ew-resize; }
 .check-field { display: flex !important; align-items: center; gap: 8px; min-height: 25px; margin-bottom: 6px !important; cursor: pointer; }
 .check-field input { width: 15px; height: 15px; margin: 0; accent-color: var(--blue); }
 .wire-property-group { min-height: 250px; }
@@ -147,11 +149,21 @@ main, .workspace { height: calc(100vh - 68px); }
 .compact-empty p { margin: 10px 0 0; font-size: 11px; }
 .wire-endpoint-summary { margin: 0 0 13px; padding: 9px 10px; border-radius: 6px; background: var(--soft); color: #647188; font-size: 9px; line-height: 1.7; overflow-wrap: anywhere; }
 .wire-property-form .secondary-btn { margin: 7px 0 4px; }
+.interface-gap-list { display: grid; gap: 8px; margin-bottom: 12px; }
+.interface-gap-row { display: grid !important; grid-template-columns: minmax(0,70px) minmax(80px,1fr) 28px 22px; align-items: center; gap: 6px; margin: 0 !important; }
+.interface-gap-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.interface-gap-row input[type="range"] { width: 100%; margin: 0; padding: 0; accent-color: var(--blue); cursor: ew-resize; }
+.interface-gap-row output { color: #52617a; font: 750 9px ui-monospace, monospace; text-align: right; }
+.interface-gap-reset { width: 22px; height: 22px; padding: 0; border: 0; border-radius: 5px; background: var(--soft); color: #8794a8; font-size: 11px; }
+.interface-gap-reset:hover { color: var(--blue); background: var(--blue-soft); }
+.interface-gap-reset:disabled { cursor: default; opacity: .35; }
 .assembly-editor .title-input { width: 260px; }
 .accent { color: var(--blue); border-color: #b9ccf4; background: #f3f7ff; }
-.assembly-canvas { flex: 1; min-height: 0; overflow: hidden; position: relative; background-color: #f7f8fa; background-image: radial-gradient(#cdd4de 1px, transparent 1px); background-size: 18px 18px; }
+.assembly-viewport { flex: 1; min-height: 0; overflow: auto; background: #e9edf2; }
+.assembly-canvas { position: relative; overflow: hidden; background-color: #f7f8fa; background-image: radial-gradient(#cdd4de 1px, transparent 1px); box-shadow: 0 0 0 1px #dfe5ec; }
 .wire-layer, .node-layer { position: absolute; inset: 0; transform-origin: 0 0; }
 .wire-layer { overflow: visible; pointer-events: none; }
+.node-layer { pointer-events: none; }
 .wire-group { pointer-events: stroke; cursor: pointer; }
 .wire-hit { stroke: transparent; stroke-width: 14; fill: none; pointer-events: stroke; }
 .wire-outline { stroke: rgba(255,255,255,.92); stroke-width: var(--wire-outline-width, 5); fill: none; stroke-linecap: round; stroke-linejoin: round; }
@@ -167,10 +179,13 @@ main, .workspace { height: calc(100vh - 68px); }
 .wire-middle-label rect { fill: #172235; stroke: white; stroke-width: 2; }
 .wire-middle-label text { fill: white; font: 750 9px ui-sans-serif, system-ui, sans-serif; }
 .pin-tag text { font-family: ui-sans-serif, system-ui, sans-serif; }
-.board-node { width: 230px; height: 215px; position: absolute; border: 1px solid transparent; border-radius: 8px; background: transparent; user-select: none; cursor: grab; }
+.board-node { width: 230px; height: 215px; position: absolute; border: 1px solid transparent; border-radius: 8px; background: transparent; user-select: none; cursor: grab; pointer-events: auto; touch-action: none; }
+.board-node.fixed { cursor: default; }
+.board-node.fixed.selected { border-style: dashed; }
 .board-node.selected { border-color: rgba(39,100,231,.65); background: rgba(39,100,231,.035); }
 .node-header { position: absolute; left: 15px; right: 15px; bottom: -7px; height: 30px; display: flex; align-items: center; justify-content: center; padding: 0 6px; cursor: grab; background: transparent; }
 .node-header strong { font-size: 11px; flex: 1; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-shadow: 0 1px 0 white, 0 0 5px white; }
+.node-fixed-mark { color: var(--blue); font-size: 7px; vertical-align: 1px; }
 .node-action { border: 0; color: #8794a8; background: rgba(255,255,255,.94); width: 22px; height: 22px; padding: 0; border-radius: 5px; font-size: 14px; opacity: 0; display: grid; place-items: center; }
 .node-rotate { color: var(--blue); font-size: 15px; }
 .node-flip { color: #8a57c9; font-size: 15px; }

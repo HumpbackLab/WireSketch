@@ -15,6 +15,7 @@
     "name": { "type": "string", "minLength": 1, "maxLength": 120 },
     "description": { "type": "string", "default": "" },
     "layout": { "$ref": "#/$defs/layout" },
+    "canvasSize": { "$ref": "#/$defs/canvasSize" },
     "wireDefaults": { "$ref": "#/$defs/wireDefaults" },
     "nodes": {
       "type": "array",
@@ -46,6 +47,15 @@
         "routing": { "enum": ["hybrid", "orthogonal", "manual"], "description": "hybrid prefers clear diagonal wire bundles and falls back to obstacle-avoiding orthogonal routes." }
       }
     },
+    "canvasSize": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["width", "height"],
+      "properties": {
+        "width": { "type": "number", "minimum": 600, "maximum": 3000, "default": 1200 },
+        "height": { "type": "number", "minimum": 400, "maximum": 2000, "default": 800 }
+      }
+    },
     "node": {
       "type": "object",
       "additionalProperties": false,
@@ -58,7 +68,13 @@
         "y": { "type": "number", "description": "Top coordinate in diagram-px." },
         "rotation": { "type": "integer", "enum": [0, 90, 180, 270], "default": 0, "description": "Clockwise rotation of this PCB instance. Omitted values are treated as 0 for backward compatibility." },
         "flipX": { "type": "boolean", "default": false, "description": "Mirrors this PCB instance horizontally in its local, unrotated coordinate system." },
-        "scale": { "type": "number", "minimum": 0.5, "maximum": 2, "default": 1, "description": "Visual scale of this PCB instance. Image, interfaces, pins, routing anchors, and export output scale together." }
+        "scale": { "type": "number", "minimum": 0.5, "maximum": 2, "default": 1, "description": "Visual scale of this PCB instance. Image, interfaces, pins, routing anchors, and export output scale together." },
+        "fixed": { "type": "boolean", "default": false, "description": "Prevents this board instance from being dragged or moved by automatic layout." },
+        "interfaceLabelGaps": {
+          "type": "object",
+          "description": "Optional spacing added between adjacent signal-name labels, keyed by interface ID for this board instance; wire paths are unaffected.",
+          "additionalProperties": { "type": "number", "minimum": 0, "maximum": 24 }
+        }
       }
     },
     "endpoint": {
@@ -86,7 +102,10 @@
       "additionalProperties": false,
       "properties": {
         "width": { "type": "number", "minimum": 1, "maximum": 8, "default": 2.2 },
-        "gap": { "type": "number", "minimum": 2, "maximum": 16, "default": 6 },
+        "labelGap": { "type": "number", "minimum": 0, "maximum": 24, "default": 6, "description": "Default spacing added between adjacent signal-name labels; wire paths are unaffected." },
+        "gap": { "type": "number", "minimum": 0, "maximum": 24, "deprecated": true, "description": "Backward-compatible alias for labelGap." },
+        "routeGap": { "type": "number", "minimum": 0, "maximum": 20, "default": 6, "description": "Default spacing between routed signal wires in the same connection bundle. Zero allows coincident routes." },
+        "cornerRadius": { "type": "number", "minimum": 0, "maximum": 24, "default": 0, "description": "Default radius for rounded polyline corners. Zero preserves sharp corners." },
         "showFromLabels": { "type": "boolean", "default": true },
         "showToLabels": { "type": "boolean", "default": true }
       }
@@ -96,6 +115,7 @@
       "additionalProperties": false,
       "properties": {
         "width": { "type": "number", "minimum": 1, "maximum": 8 },
+        "cornerRadius": { "type": "number", "minimum": 0, "maximum": 24 },
         "showFromLabels": { "type": "boolean" },
         "showToLabels": { "type": "boolean" }
       }
@@ -107,6 +127,7 @@
       "properties": {
         "id": { "$ref": "#/$defs/id" },
         "description": { "type": "string", "default": "" },
+        "gap": { "type": "number", "minimum": 0, "maximum": 20, "description": "Optional routed wire spacing override for this connection bundle. Zero allows coincident routes." },
         "from": { "$ref": "#/$defs/endpoint" },
         "to": { "$ref": "#/$defs/endpoint" },
         "pinMap": {
