@@ -173,7 +173,7 @@
           <div class="statusbar">
             <span><i class="dot blue"></i><b id="nodeCount">0</b> 块板卡</span>
             <span><i class="dot orange"></i><b id="wireCount">0</b> 根导线</span>
-            <span class="status-help">提示：滚轮缩放画布 · 单击选择 · 选中板卡后按 R 旋转、F 翻转</span>
+            <span class="status-help">提示：滚轮缩放 · 单击选择 · Esc 取消接线 · 选中板卡后按 R 旋转、F 翻转</span>
           </div>
         </section>
         <aside class="assembly-property-panel">
@@ -196,6 +196,12 @@
             <div id="nodeInterfaceGaps" class="interface-gap-list"></div>
             <button type="button" class="secondary-btn full" id="resetNodeGapsBtn">全部恢复全局标签间距</button>
           </section>
+          <section id="portPropertyGroup" class="property-group hidden">
+            <h3>所选端口</h3>
+            <div id="portPropertySummary" class="wire-endpoint-summary"></div>
+            <label class="check-field"><input id="portSingleSignalMode" type="checkbox" /><span>开启单信号线连接模式</span></label>
+            <p id="portModeHint" class="port-mode-hint"></p>
+          </section>
           <section id="wirePropertyGroup" class="property-group wire-property-group hidden">
             <h3>所选信号线</h3>
             <form id="wirePropertyForm" class="wire-property-form">
@@ -208,7 +214,7 @@
               <label class="check-field"><input id="wireShowFromLabels" type="checkbox" /><span>显示端点 1 信号名</span></label>
               <label class="check-field"><input id="wireShowToLabels" type="checkbox" /><span>显示端点 2 信号名</span></label>
               <button type="button" class="secondary-btn full" id="resetWireStyleBtn">恢复全局样式</button>
-              <button type="button" class="danger-link" id="deleteWireBtn">删除此信号线</button>
+              <button type="button" class="danger-link" id="deleteWireBtn">删除整条线束</button>
             </form>
           </section>
         </aside>

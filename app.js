@@ -53,6 +53,7 @@
   let selectedNodeId = null;
   let selectedWireId = null;
   let selectedWirePinKey = null;
+  let selectedPort = null;
   let pendingPort = null;
   let zoom = 1;
   let boardZoom = null;
@@ -137,6 +138,8 @@
   }
   function nodeFlipX(node) { return node?.flipX===true; }
   function nodeFixed(node) { return node?.fixed===true; }
+  function interfaceSingleSignalMode(node,interfaceId) { return node?.interfaceConnectionModes?.[interfaceId]==='signal'; }
+  function connectionMode(connection) { return connection?.mode==='signal'?'signal':'bundle'; }
   function nodeScale(node) {
     const scale=Number(node?.scale);
     return Number.isFinite(scale)?Math.max(.5,Math.min(2,scale)):1;
@@ -476,7 +479,7 @@
     const wireDefaults=assemblyWireDefaults();
     return {
       schema:ASSEMBLY_SCHEMA_ID,
-      schemaVersion:'1.2.0',
+      schemaVersion:'1.3.0',
       kind:'wiresketch/assembly',
       version:1,
       id:state.assembly.id,
@@ -485,9 +488,10 @@
       layout:{origin:'top-left',axisX:'right',axisY:'down',unit:'diagram-px',routing:'hybrid'},
       canvasSize:assemblyCanvasSize(),
       wireDefaults:{width:wireDefaults.width,labelGap:wireDefaults.gap,routeGap:wireDefaults.routeGap,cornerRadius:wireDefaults.cornerRadius,showFromLabels:wireDefaults.showFromLabels,showToLabels:wireDefaults.showToLabels},
-      nodes:state.assembly.nodes.map(node=>{const labelGaps=node.interfaceLabelGaps||node.interfaceSignalGaps;return {id:node.id,boardId:node.boardId,label:node.label,x:node.x,y:node.y,rotation:nodeRotation(node),flipX:nodeFlipX(node),scale:nodeScale(node),fixed:nodeFixed(node),...(labelGaps?{interfaceLabelGaps:{...labelGaps}}:{})};}),
+      nodes:state.assembly.nodes.map(node=>{const labelGaps=node.interfaceLabelGaps||node.interfaceSignalGaps,modes=node.interfaceConnectionModes;return {id:node.id,boardId:node.boardId,label:node.label,x:node.x,y:node.y,rotation:nodeRotation(node),flipX:nodeFlipX(node),scale:nodeScale(node),fixed:nodeFixed(node),...(labelGaps?{interfaceLabelGaps:{...labelGaps}}:{}),...(modes&&Object.keys(modes).length?{interfaceConnectionModes:{...modes}}:{})};}),
       connections:state.assembly.connections.map(connection=>({
         id:connection.id,
+        mode:connectionMode(connection),
         description:connection.description||'',
         ...(connection.gap==null?{}:{gap:connectionWireGap(connection)}),
         from:{nodeId:connection.from.nodeId,interfaceId:connection.from.interfaceId},
@@ -551,17 +555,30 @@
       const ports = board.interfaces.map(intf => {
         const anchor = getInterfaceAnchor(board, intf, node);
         const pending = pendingPort?.nodeId === node.id && pendingPort?.interfaceId === intf.id ? 'pending' : '';
-        return `<button class="node-port ${anchor.side} ${pending}" style="left:${anchor.x}px;top:${anchor.y}px" data-node="${node.id}" data-interface="${intf.id}" title="${escapeHtml(intf.name)}"><span class="port-dot"></span><span class="port-label">${escapeHtml(intf.name)} · ${intf.pins.length}P</span></button>`;
+        const selected=selectedPort?.nodeId===node.id&&selectedPort?.interfaceId===intf.id?'selected':'';
+        const single=interfaceSingleSignalMode(node,intf.id)?'single-mode':'';
+        return `<button class="node-port ${anchor.side} ${pending} ${selected} ${single}" style="left:${anchor.x}px;top:${anchor.y}px" data-node="${node.id}" data-interface="${intf.id}" title="${escapeHtml(intf.name)}"><span class="port-dot"></span><span class="port-label">${escapeHtml(intf.name)} · ${intf.pins.length}P${single?' · 单线模式':''}</span></button>`;
+      }).join('');
+      const pins=board.interfaces.filter(intf=>interfaceSingleSignalMode(node,intf.id)&&(pendingPort?.pin||selectedPort?.nodeId===node.id&&selectedPort?.interfaceId===intf.id)).flatMap(intf=>{
+        const anchor=getInterfaceAnchor(board,intf,node),edge=interfaceEdgeGeometry(board,intf,node,baseInterfaceSide(intf.rect)),verticalEdge=anchor.side==='left'||anchor.side==='right';
+        const entries=intf.pins.map((name,index)=>{const pin=index+1,point=getPinAnchor(board,intf,pin,node);return {name,index,pin,rank:0,projection:(point.x-anchor.x)*edge.dx+(point.y-anchor.y)*edge.dy};});
+        [...entries].sort((first,second)=>first.projection-second.projection).forEach((entry,rank)=>entry.rank=rank);
+        return entries.map(entry=>{
+          const endpoint={nodeId:node.id,interfaceId:intf.id},connectionCount=pinConnections(endpoint,entry.pin).length,connected=connectionCount>0,pending=pendingPort?.nodeId===node.id&&pendingPort?.interfaceId===intf.id&&pendingPort?.pin===entry.pin;
+          const offset=(entry.rank-(entries.length-1)/2)*(verticalEdge?28:82),outward=verticalEdge?53:25;
+          const x=anchor.x+anchor.dx*outward+edge.dx*offset,y=anchor.y+anchor.dy*outward+edge.dy*offset,color=pinSignalColor(entry.name,entry.index);
+          return `<button class="node-pin ${anchor.side} ${connected?'connected':''} ${pending?'pending':''}" style="left:${x}px;top:${y}px;--pin-color:${color}" data-node="${node.id}" data-interface="${intf.id}" data-pin="${entry.pin}" title="${escapeHtml(intf.name)} / ${escapeHtml(entry.name)}${connected?` · ${connectionCount} 条连接`:''}"><span class="node-pin-dot"></span><b>${entry.pin}</b><span class="node-pin-name">${escapeHtml(entry.name)}</span>${connected?`<i>×${connectionCount}</i>`:''}</button>`;
+        });
       }).join('');
       const source=geometry.source,rotation=nodeRotation(node),scaleX=nodeFlipX(node)?-1:1;
       const imageSource=board.source==='generated'?placeholderSvg('',board.generated?.width,board.generated?.height,board.generated?.color):board.image;
       const generatedName=board.source==='generated'?`<span class="generated-node-name" style="left:${geometry.centerX}px;top:${geometry.centerY}px">${escapeHtml(board.name)}</span>`:'';
-      return `<article class="board-node ${node.id===selectedNodeId?'selected':''} ${nodeFixed(node)?'fixed':''}" data-id="${node.id}" style="left:${node.x}px;top:${node.y}px"><div class="node-body">${imageSource?`<img src="${imageSource}" data-board="${board.id}" alt="" style="left:${source.x}px;top:${source.y}px;width:${source.width}px;height:${source.height}px;transform:rotate(${rotation}deg) scaleX(${scaleX});transform-origin:center">`:`<div class="node-placeholder" style="transform:rotate(${rotation}deg) scaleX(${scaleX})"></div>`}${generatedName}</div><footer class="node-header"><strong>${nodeFixed(node)?'<span class="node-fixed-mark" title="位置已固定">◆</span> ':''}${escapeHtml(node.label)}</strong><button class="node-action node-scale-down" title="缩小板卡">−</button><span class="node-scale-label">${Math.round(nodeScale(node)*100)}%</span><button class="node-action node-scale-up" title="放大板卡">＋</button><button class="node-action node-flip" title="水平翻转">⇆</button><button class="node-action node-rotate" title="顺时针旋转 90°">↻</button><button class="node-action node-remove" title="移除板卡">×</button></footer>${ports}</article>`;
+      return `<article class="board-node ${node.id===selectedNodeId?'selected':''} ${nodeFixed(node)?'fixed':''}" data-id="${node.id}" style="left:${node.x}px;top:${node.y}px"><div class="node-body">${imageSource?`<img src="${imageSource}" data-board="${board.id}" alt="" style="left:${source.x}px;top:${source.y}px;width:${source.width}px;height:${source.height}px;transform:rotate(${rotation}deg) scaleX(${scaleX});transform-origin:center">`:`<div class="node-placeholder" style="transform:rotate(${rotation}deg) scaleX(${scaleX})"></div>`}${generatedName}</div><footer class="node-header"><strong>${nodeFixed(node)?'<span class="node-fixed-mark" title="位置已固定">◆</span> ':''}${escapeHtml(node.label)}</strong><button class="node-action node-scale-down" title="缩小板卡">−</button><span class="node-scale-label">${Math.round(nodeScale(node)*100)}%</span><button class="node-action node-scale-up" title="放大板卡">＋</button><button class="node-action node-flip" title="水平翻转">⇆</button><button class="node-action node-rotate" title="顺时针旋转 90°">↻</button><button class="node-action node-remove" title="移除板卡">×</button></footer>${ports}${pins}</article>`;
     }).join('');
     $$('.board-node').forEach(nodeEl => {
-      const selectNode=()=>{selectedNodeId=nodeEl.dataset.id;selectedWireId=null;selectedWirePinKey=null;renderSelection();};
-      nodeEl.onpointerdown = e => { if(e.button!==0)return;selectNode();const node=state.assembly.nodes.find(item=>item.id===nodeEl.dataset.id);if (!nodeFixed(node)&&!e.target.closest('.node-port,.node-action')) startNodeDrag(e,nodeEl.dataset.id); };
-      nodeEl.onclick = e => {if(!e.target.closest('.node-port,.node-action'))selectNode();};
+      const selectNode=()=>{selectedNodeId=nodeEl.dataset.id;selectedWireId=null;selectedWirePinKey=null;selectedPort=null;renderSelection();};
+      nodeEl.onpointerdown = e => { if(e.button!==0)return;if(!e.target.closest('.node-port,.node-pin'))selectNode();const node=state.assembly.nodes.find(item=>item.id===nodeEl.dataset.id);if (!nodeFixed(node)&&!e.target.closest('.node-port,.node-pin,.node-action')) startNodeDrag(e,nodeEl.dataset.id); };
+      nodeEl.onclick = e => {if(!e.target.closest('.node-port,.node-pin,.node-action'))selectNode();};
       $('.node-scale-down', nodeEl).onclick = e => { e.stopPropagation(); resizeNode(nodeEl.dataset.id,-.1); };
       $('.node-scale-up', nodeEl).onclick = e => { e.stopPropagation(); resizeNode(nodeEl.dataset.id,.1); };
       $('.node-flip', nodeEl).onclick = e => { e.stopPropagation(); flipNode(nodeEl.dataset.id); };
@@ -569,6 +586,7 @@
       $('.node-remove', nodeEl).onclick = e => { e.stopPropagation(); removeNode(nodeEl.dataset.id); };
     });
     $$('.node-port').forEach(port => port.onclick = e => { e.stopPropagation(); selectPort(port.dataset.node, port.dataset.interface); });
+    $$('.node-pin').forEach(pin=>pin.onclick=e=>{e.stopPropagation();selectedPort={nodeId:pin.dataset.node,interfaceId:pin.dataset.interface};selectedNodeId=null;selectedWireId=null;selectedWirePinKey=null;selectPortPin(Number(pin.dataset.pin));});
     $$('.node-body img[data-board]').forEach(img => {
       const captureSize = () => {
         const board = state.boards.find(b=>b.id===img.dataset.board);
@@ -592,6 +610,7 @@
 
   function renderSelection() {
     $$('.board-node').forEach(n => n.classList.toggle('selected', n.dataset.id === selectedNodeId));
+    $$('.node-port').forEach(port=>port.classList.toggle('selected',port.dataset.node===selectedPort?.nodeId&&port.dataset.interface===selectedPort?.interfaceId));
     $$('.signal-wire').forEach(w => w.classList.toggle('selected', w.closest('.wire-group')?.dataset.id===selectedWireId&&w.dataset.pinKey===selectedWirePinKey));
     renderAssemblyProperties();
   }
@@ -641,15 +660,23 @@
     $('#defaultShowFromLabels').checked=defaults.showFromLabels;
     $('#defaultShowToLabels').checked=defaults.showToLabels;
     const node=state.assembly.nodes.find(item=>item.id===selectedNodeId),board=state.boards.find(item=>item.id===node?.boardId);
-    const selected=selectedSignal(),hasNode=!!node&&!!board,hasSignal=!!selected;
-    $('#globalPropertyGroup').classList.toggle('hidden',hasNode||hasSignal);
-    $('#nodePropertyGroup').classList.toggle('hidden',!hasNode);
+    const portNode=state.assembly.nodes.find(item=>item.id===selectedPort?.nodeId),portBoard=state.boards.find(item=>item.id===portNode?.boardId),portInterface=portBoard?.interfaces.find(item=>item.id===selectedPort?.interfaceId);
+    const selected=selectedSignal(),hasNode=!!node&&!!board,hasPort=!!portNode&&!!portInterface,hasSignal=!!selected;
+    $('#globalPropertyGroup').classList.toggle('hidden',hasNode||hasPort||hasSignal);
+    $('#nodePropertyGroup').classList.toggle('hidden',!hasNode||hasPort||hasSignal);
+    $('#portPropertyGroup').classList.toggle('hidden',!hasPort||hasSignal);
     $('#wirePropertyGroup').classList.toggle('hidden',!hasSignal);
-    $('#assemblyPropertyTitle').textContent=hasSignal?'信号线属性':hasNode?'板卡属性':'全局属性';
+    $('#assemblyPropertyTitle').textContent=hasSignal?(connectionMode(selected.connection)==='signal'?'信号线属性':'线束属性'):hasPort?'端口属性':hasNode?'板卡属性':'全局属性';
     if(node&&board){
       $('#nodePropertySummary').textContent=node.label;
       $('#nodeFixed').checked=nodeFixed(node);
       $('#nodeInterfaceGaps').innerHTML=board.interfaces.map(intf=>{const override=node.interfaceLabelGaps?.[intf.id]??node.interfaceSignalGaps?.[intf.id],value=override??defaults.gap;return `<div class="interface-gap-row"><span title="${escapeHtml(intf.name)}">${escapeHtml(intf.name)} · ${intf.pins.length}P</span><input type="range" min="0" max="24" step="1" value="${value}" data-interface="${intf.id}" aria-label="${escapeHtml(intf.name)} 信号标签间距"><output>${value}</output><button type="button" class="interface-gap-reset" data-reset-interface="${intf.id}" title="恢复全局 ${defaults.gap}" ${override==null?'disabled':''}>↺</button></div>`;}).join('')||'<div class="compact-empty">此板卡没有接口</div>';
+    }
+    if(hasPort){
+      const single=interfaceSingleSignalMode(portNode,portInterface.id);
+      $('#portPropertySummary').innerHTML=`<b>${escapeHtml(portNode.label)}</b><br>${escapeHtml(portInterface.name)} · ${portInterface.pins.length}P`;
+      $('#portSingleSignalMode').checked=single;
+      $('#portModeHint').textContent=single?'点击画布上的 Pin 托盘选择起点；随后可用的对端托盘会自动展开。':'默认按针脚顺序整束连接，删除时会删除整条线束。';
     }
     if(!selected)return;
     const {signal,from,to}=selected,style=signalWireStyle(signal);
@@ -664,13 +691,15 @@
     $('#wireRouteGapValue').value=routeGap;
     $('#wireShowFromLabels').checked=style.showFromLabels;
     $('#wireShowToLabels').checked=style.showToLabels;
+    $('#deleteWireBtn').textContent=connectionMode(selected.connection)==='signal'?'删除此信号线':'删除整条线束';
   }
 
   function deleteSelectedWire() {
     const selected=selectedSignal();if(!selected)return;
-    editableSelectedSignal();
-    selected.connection.pinMap=selected.connection.pinMap.filter(pair=>wirePinKey(pair)!==selectedWirePinKey);
-    if(!selected.connection.pinMap.length)state.assembly.connections=state.assembly.connections.filter(connection=>connection!==selected.connection);
+    if(connectionMode(selected.connection)==='signal'){
+      selected.connection.pinMap=selected.connection.pinMap.filter(pair=>wirePinKey(pair)!==selectedWirePinKey);
+      if(!selected.connection.pinMap.length)state.assembly.connections=state.assembly.connections.filter(connection=>connection!==selected.connection);
+    }else state.assembly.connections=state.assembly.connections.filter(connection=>connection!==selected.connection);
     selectedWireId=null;
     selectedWirePinKey=null;
     saveState();
@@ -955,7 +984,7 @@
       }).join('');
       return `<g class="wire-group" data-id="${c.id}">${lines}</g>`;
     }).join('');
-    $$('.signal-wire').forEach(w => w.onclick = e => { e.stopPropagation(); selectedWireId=w.closest('.wire-group').dataset.id;selectedWirePinKey=w.dataset.pinKey;selectedNodeId=null;renderSelection(); });
+    $$('.signal-wire').forEach(w => w.onclick = e => { e.stopPropagation(); selectedWireId=w.closest('.wire-group').dataset.id;selectedWirePinKey=w.dataset.pinKey;selectedNodeId=null;selectedPort=null;renderSelection(); });
   }
 
   function startNodeDrag(e, nodeId) {
@@ -973,25 +1002,76 @@
   }
   function endNodeDrag() { if(dragState){dragState=null;ignoreCanvasClickUntil=performance.now()+150;saveState();} }
 
+  function sameEndpoint(first,second) { return first?.nodeId===second?.nodeId&&first?.interfaceId===second?.interfaceId; }
+
+  function pinConnections(endpoint,pin) {
+    const matches=[];
+    for(const connection of state.assembly.connections){
+      const from=endpointDetails(connection.from),to=endpointDetails(connection.to);if(!from.intf||!to.intf)continue;
+      for(const pair of connectionPinPairs(connection,from.intf,to.intf)){
+        if(sameEndpoint(connection.from,endpoint)&&pair.from===pin)matches.push({connection,pair});
+        if(sameEndpoint(connection.to,endpoint)&&pair.to===pin)matches.push({connection,pair});
+      }
+    }
+    return matches;
+  }
+
+  function pinPairExists(first,second) {
+    return state.assembly.connections.some(connection=>{
+      const from=endpointDetails(connection.from),to=endpointDetails(connection.to);if(!from.intf||!to.intf)return false;
+      return connectionPinPairs(connection,from.intf,to.intf).some(pair=>(sameEndpoint(connection.from,first)&&pair.from===first.pin&&sameEndpoint(connection.to,second)&&pair.to===second.pin)||(sameEndpoint(connection.to,first)&&pair.to===first.pin&&sameEndpoint(connection.from,second)&&pair.from===second.pin));
+    });
+  }
+
   function selectPort(nodeId, interfaceId) {
-    if (!pendingPort) { pendingPort={nodeId,interfaceId}; toast('已选择起点，请点击另一个接口'); renderAssembly(); return; }
-    if (pendingPort.nodeId===nodeId && pendingPort.interfaceId===interfaceId) { pendingPort=null; toast('已取消连接'); renderAssembly(); return; }
-    const duplicate=state.assembly.connections.some(c => [c.from,c.to].some(p=>p.nodeId===pendingPort.nodeId&&p.interfaceId===pendingPort.interfaceId) && [c.from,c.to].some(p=>p.nodeId===nodeId&&p.interfaceId===interfaceId));
-    if (duplicate) toast('这两个接口已经连接');
+    const endpoint={nodeId,interfaceId},node=state.assembly.nodes.find(item=>item.id===nodeId);
+    selectedPort=endpoint;selectedNodeId=null;selectedWireId=null;selectedWirePinKey=null;
+    if(pendingPort?.pin){
+      toast(interfaceSingleSignalMode(node,interfaceId)?'请选择对端信号':'对端也需要开启单信号线连接模式');
+      renderAssembly();return;
+    }
+    if(!pendingPort){
+      if(interfaceSingleSignalMode(node,interfaceId))toast('单信号线模式：请在右侧选择一个信号');
+      else {pendingPort=endpoint;toast('已选择线束起点，请点击另一个接口');}
+      renderAssembly();return;
+    }
+    if(sameEndpoint(pendingPort,endpoint)){pendingPort=null;toast('已取消连接');renderAssembly();return;}
+    if(interfaceSingleSignalMode(node,interfaceId)){toast('两端连接模式不一致，请统一后重试');renderAssembly();return;}
+    const duplicate=state.assembly.connections.some(connection=>connectionMode(connection)==='bundle'&&((sameEndpoint(connection.from,pendingPort)&&sameEndpoint(connection.to,endpoint))||(sameEndpoint(connection.to,pendingPort)&&sameEndpoint(connection.from,endpoint))));
+    if(duplicate)toast('这两个接口已经存在整束连接');
     else {
-      const sourceNode=state.assembly.nodes.find(n=>n.id===pendingPort.nodeId), targetNode=state.assembly.nodes.find(n=>n.id===nodeId);
-      const sourceIf=state.boards.find(b=>b.id===sourceNode?.boardId)?.interfaces.find(i=>i.id===pendingPort.interfaceId);
-      const targetIf=state.boards.find(b=>b.id===targetNode?.boardId)?.interfaces.find(i=>i.id===interfaceId);
+      const sourceNode=state.assembly.nodes.find(item=>item.id===pendingPort.nodeId),targetNode=node;
+      const sourceIf=state.boards.find(board=>board.id===sourceNode?.boardId)?.interfaces.find(intf=>intf.id===pendingPort.interfaceId);
+      const targetIf=state.boards.find(board=>board.id===targetNode?.boardId)?.interfaces.find(intf=>intf.id===interfaceId);
       const count=Math.min(sourceIf?.pins.length||0,targetIf?.pins.length||0);
       const pinMap=Array.from({length:count},(_,index)=>({from:index+1,to:index+1}));
-      state.assembly.connections.push({id:uid('wire'),from:pendingPort,to:{nodeId,interfaceId},pinMap}); saveState();
-      toast(sourceIf?.pins.length===targetIf?.pins.length?'连接已创建':'连接已创建；两端针脚数量不一致');
+      state.assembly.connections.push({id:uid('wire'),mode:'bundle',from:{...pendingPort},to:endpoint,pinMap});saveState();
+      toast(sourceIf?.pins.length===targetIf?.pins.length?'线束连接已创建':'线束连接已创建；两端针脚数量不一致');
     }
-    pendingPort=null; renderAssembly();
+    pendingPort=null;renderAssembly();
+  }
+
+  function selectPortPin(pin) {
+    if(!selectedPort)return;
+    const target={...selectedPort,pin},targetNode=state.assembly.nodes.find(item=>item.id===target.nodeId);
+    if(!interfaceSingleSignalMode(targetNode,target.interfaceId))return toast('请先开启单信号线连接模式');
+    if(!pendingPort){pendingPort=target;toast('已选择信号起点，请选择对端接口和信号');renderAssembly();return;}
+    if(!pendingPort.pin)return toast('当前正在建立整束连接，请先取消');
+    if(pendingPort.nodeId===target.nodeId&&pendingPort.interfaceId===target.interfaceId&&pendingPort.pin===pin){pendingPort=null;toast('已取消连接');renderAssembly();return;}
+    const sourceNode=state.assembly.nodes.find(item=>item.id===pendingPort.nodeId);
+    if(!interfaceSingleSignalMode(sourceNode,pendingPort.interfaceId))return toast('起点端口未开启单信号线连接模式');
+    if(sameEndpoint(pendingPort,target))return toast('请选择另一个端口的信号');
+    if(pinPairExists(pendingPort,target))return toast('这两个信号已经连接');
+    const existing=state.assembly.connections.find(connection=>connectionMode(connection)==='signal'&&((sameEndpoint(connection.from,pendingPort)&&sameEndpoint(connection.to,target))||(sameEndpoint(connection.to,pendingPort)&&sameEndpoint(connection.from,target))));
+    if(existing){
+      if(sameEndpoint(existing.from,pendingPort))existing.pinMap.push({from:pendingPort.pin,to:pin});
+      else existing.pinMap.push({from:pin,to:pendingPort.pin});
+    }else state.assembly.connections.push({id:uid('wire'),mode:'signal',from:{nodeId:pendingPort.nodeId,interfaceId:pendingPort.interfaceId},to:{nodeId:target.nodeId,interfaceId:target.interfaceId},pinMap:[{from:pendingPort.pin,to:pin}]});
+    pendingPort=null;saveState();toast('单信号线连接已创建');renderAssembly();
   }
 
   function removeNode(id) {
-    state.assembly.nodes=state.assembly.nodes.filter(n=>n.id!==id); state.assembly.connections=state.assembly.connections.filter(c=>c.from.nodeId!==id&&c.to.nodeId!==id); selectedNodeId=null; saveState(); renderAssembly();
+    state.assembly.nodes=state.assembly.nodes.filter(n=>n.id!==id); state.assembly.connections=state.assembly.connections.filter(c=>c.from.nodeId!==id&&c.to.nodeId!==id); selectedNodeId=null;selectedPort=null;pendingPort=null; saveState(); renderAssembly();
   }
 
   function rotateNode(id) {
@@ -1183,7 +1263,7 @@
   function loadAssemblyDocument(doc) {
     if(doc?.kind!=='wiresketch/assembly'||!Array.isArray(doc.nodes))return false;
     (doc.embeddedBoards||[]).forEach(board=>{if(!state.boards.some(b=>b.id===board.id)){board.builtIn=false;if(board.source==='generated')refreshGeneratedBoard(board);state.boards.push(board);}});
-    state.assembly={...doc,embeddedBoards:undefined}; selectedNodeId=null;selectedWireId=null;selectedWirePinKey=null;pendingPort=null;saveState();renderComponentList();renderAssembly();toast('装配体已打开');
+    state.assembly={...doc,embeddedBoards:undefined}; selectedNodeId=null;selectedWireId=null;selectedWirePinKey=null;selectedPort=null;pendingPort=null;saveState();renderComponentList();renderAssembly();toast('装配体已打开');
     return true;
   }
 
@@ -1229,7 +1309,7 @@
     const syncExportControls=()=>{const svg=$('#exportFormat').value==='svg';$('#exportScale').disabled=svg;$('#renderAssemblyBtn').textContent=svg?'导出 SVG':'导出 PNG';};
     $('#exportFormat').onchange=syncExportControls;syncExportControls();
     $('#autoLayoutBtn').onclick=autoLayout;$('#renderAssemblyBtn').onclick=()=>$('#exportFormat').value==='svg'?exportAssemblySvg():renderAssemblyImage();$('#exportAssemblyBtn').onclick=exportAssembly;
-    $('#clearAssemblyBtn').onclick=()=>{if(!state.assembly.nodes.length||confirm('确定清空当前装配画布吗？')){state.assembly.nodes=[];state.assembly.connections=[];selectedNodeId=null;selectedWireId=null;selectedWirePinKey=null;saveState();renderAssembly();}};
+    $('#clearAssemblyBtn').onclick=()=>{if(!state.assembly.nodes.length||confirm('确定清空当前装配画布吗？')){state.assembly.nodes=[];state.assembly.connections=[];selectedNodeId=null;selectedWireId=null;selectedWirePinKey=null;selectedPort=null;pendingPort=null;saveState();renderAssembly();}};
     $('#importAssemblyBtn').onclick=()=>$('#importAssemblyInput').click();$('#importAssemblyInput').onchange=e=>{if(e.target.files[0])importAssembly(e.target.files[0]);e.target.value='';};
     $('#defaultWireWidth').oninput=e=>{const value=Math.max(1,Math.min(8,+e.target.value||DEFAULT_WIRE_STYLE.width));updateAssemblyWireDefaults({width:value});$('#defaultWireWidthValue').value=value.toFixed(1);saveState();renderWires();};
     $('#defaultWireGap').oninput=e=>{const value=Math.max(0,Math.min(24,Number(e.target.value)||0));updateAssemblyWireDefaults({labelGap:value});$('#defaultWireGapValue').value=value;saveState();renderWires();};
@@ -1243,6 +1323,7 @@
     $('#nodeInterfaceGaps').onclick=e=>{const button=e.target.closest('[data-reset-interface]'),node=state.assembly.nodes.find(item=>item.id===selectedNodeId);if(!button||!node)return;delete node.interfaceLabelGaps?.[button.dataset.resetInterface];delete node.interfaceSignalGaps?.[button.dataset.resetInterface];if(node.interfaceLabelGaps&&!Object.keys(node.interfaceLabelGaps).length)delete node.interfaceLabelGaps;if(node.interfaceSignalGaps&&!Object.keys(node.interfaceSignalGaps).length)delete node.interfaceSignalGaps;saveState();renderAssemblyProperties();renderWires();};
     $('#resetNodeGapsBtn').onclick=()=>{const node=state.assembly.nodes.find(item=>item.id===selectedNodeId);if(!node)return;delete node.interfaceLabelGaps;delete node.interfaceSignalGaps;saveState();renderAssemblyProperties();renderWires();};
     $('#nodeFixed').onchange=e=>{const node=state.assembly.nodes.find(item=>item.id===selectedNodeId);if(!node)return;node.fixed=e.target.checked;saveState();renderAssembly();toast(node.fixed?'板卡位置已固定':'板卡位置已解除固定');};
+    $('#portSingleSignalMode').onchange=e=>{const node=state.assembly.nodes.find(item=>item.id===selectedPort?.nodeId);if(!node||!selectedPort)return;const conflicting=state.assembly.connections.some(connection=>connectionMode(connection)===(e.target.checked?'bundle':'signal')&&(sameEndpoint(connection.from,selectedPort)||sameEndpoint(connection.to,selectedPort)));if(conflicting){e.target.checked=!e.target.checked;toast(e.target.checked?'请先删除该端口的单信号线连接':'请先删除该端口的整束连接');return;}node.interfaceConnectionModes=node.interfaceConnectionModes||{};if(e.target.checked)node.interfaceConnectionModes[selectedPort.interfaceId]='signal';else delete node.interfaceConnectionModes[selectedPort.interfaceId];if(!Object.keys(node.interfaceConnectionModes).length)delete node.interfaceConnectionModes;if(sameEndpoint(pendingPort,selectedPort))pendingPort=null;saveState();renderAssembly();toast(e.target.checked?'已开启单信号线连接模式':'已恢复整束连接模式');};
     $('#wireDisplayName').oninput=e=>{const signal=editableSelectedSignal();if(!signal)return;signal.label=e.target.value;saveState();renderWires();};
     $('#wireWidth').oninput=e=>{const signal=editableSelectedSignal();if(!signal)return;signal.style=signal.style||{};signal.style.width=Math.max(1,Math.min(8,+e.target.value||assemblyWireDefaults().width));$('#wireWidthValue').value=signal.style.width.toFixed(1);saveState();renderWires();};
     $('#wireCornerRadius').oninput=e=>{const signal=editableSelectedSignal();if(!signal)return;signal.style=signal.style||{};signal.style.cornerRadius=Math.max(0,Math.min(24,Number(e.target.value)));$('#wireCornerRadiusValue').value=signal.style.cornerRadius;saveState();renderWires();};
@@ -1254,11 +1335,12 @@
     $('#deleteWireBtn').onclick=deleteSelectedWire;
     const canvas=$('#assemblyCanvas');canvas.ondragover=e=>e.preventDefault();canvas.ondrop=e=>{e.preventDefault();const id=e.dataTransfer.getData('text/pcb-id'),r=canvas.getBoundingClientRect();if(id)addNode(id,{x:(e.clientX-r.left)/zoom-NODE.width/2,y:(e.clientY-r.top)/zoom-NODE.height/2});};
     canvas.onpointermove=moveNode;canvas.onpointerup=endNodeDrag;canvas.onpointercancel=endNodeDrag;
-    canvas.onclick=e=>{if(performance.now()<ignoreCanvasClickUntil)return;if(e.target===canvas||e.target.id==='nodeLayer'){selectedNodeId=null;selectedWireId=null;selectedWirePinKey=null;pendingPort=null;renderAssembly();}};
+    canvas.onclick=e=>{if(performance.now()<ignoreCanvasClickUntil)return;if(e.target===canvas||e.target.id==='nodeLayer'){selectedNodeId=null;selectedWireId=null;selectedWirePinKey=null;selectedPort=null;pendingPort=null;renderAssembly();}};
     $('#assemblyViewport').addEventListener('wheel',e=>{e.preventDefault();setAssemblyZoom(zoom*(e.deltaY<0?1.1:.9),e.clientX,e.clientY);},{passive:false});
     $('#zoomInBtn').onclick=()=>setAssemblyZoom(zoom+.1);$('#zoomOutBtn').onclick=()=>setAssemblyZoom(zoom-.1);
     document.onkeydown=e=>{
       if(!$('#assemblyView').classList.contains('active')||['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName))return;
+      if(e.key==='Escape'&&pendingPort){e.preventDefault();pendingPort=null;renderAssembly();toast('已取消连接');return;}
       if((e.key==='r'||e.key==='R')&&selectedNodeId){e.preventDefault();rotateNode(selectedNodeId);return;}
       if((e.key==='f'||e.key==='F')&&selectedNodeId){e.preventDefault();flipNode(selectedNodeId);return;}
       if(e.key==='Delete'||e.key==='Backspace'){

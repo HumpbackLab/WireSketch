@@ -8,7 +8,7 @@
   "required": ["schema", "schemaVersion", "kind", "version", "id", "name", "layout", "nodes", "connections", "embeddedBoards"],
   "properties": {
     "schema": { "const": "urn:wiresketch:schema:assembly:1.0", "description": "Stable format identifier. Never translate or modify it." },
-    "schemaVersion": { "enum": ["1.1.0", "1.2.0"], "description": "1.2.0 adds optional global and per-signal wire presentation settings." },
+    "schemaVersion": { "enum": ["1.1.0", "1.2.0", "1.3.0"], "description": "1.3.0 adds per-interface connection modes and distinguishes bundle connections from manually connected signals." },
     "kind": { "const": "wiresketch/assembly" },
     "version": { "const": 1 },
     "id": { "$ref": "#/$defs/id" },
@@ -74,6 +74,11 @@
           "type": "object",
           "description": "Optional spacing added between adjacent signal-name labels, keyed by interface ID for this board instance; wire paths are unaffected.",
           "additionalProperties": { "type": "number", "minimum": 0, "maximum": 24 }
+        },
+        "interfaceConnectionModes": {
+          "type": "object",
+          "description": "Optional per-interface assembly connection mode keyed by interface ID. Omitted interfaces use bundle mode.",
+          "additionalProperties": { "const": "signal" }
         }
       }
     },
@@ -126,6 +131,7 @@
       "required": ["id", "description", "from", "to", "pinMap"],
       "properties": {
         "id": { "$ref": "#/$defs/id" },
+        "mode": { "enum": ["bundle", "signal"], "default": "bundle", "description": "Bundle connections are created and deleted as a whole. Signal connections contain manually selected pin pairs that may be deleted individually." },
         "description": { "type": "string", "default": "" },
         "gap": { "type": "number", "minimum": 0, "maximum": 20, "description": "Optional routed wire spacing override for this connection bundle. Zero allows coincident routes." },
         "from": { "$ref": "#/$defs/endpoint" },

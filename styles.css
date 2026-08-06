@@ -211,7 +211,19 @@ main, .workspace { height: calc(100vh - 68px); }
 .node-port.top .port-label { left: 50%; transform: translateX(-50%); bottom: 21px; }
 .node-port.bottom .port-label { left: 50%; transform: translateX(-50%); top: 21px; bottom: auto; }
 .node-port:hover .port-label { opacity: 1; }
-.node-port:hover .port-dot, .node-port.pending .port-dot { transform: scale(1.35); border-color: var(--orange); background: #fff0e6; }
+.node-port:hover .port-dot, .node-port.pending .port-dot, .node-port.selected .port-dot { transform: scale(1.35); border-color: var(--orange); background: #fff0e6; }
+.node-port.single-mode .port-dot { border-style: double; border-width: 4px; }
+.node-pin { position: absolute; z-index: 8; width: 76px; height: 25px; display: flex; align-items: center; gap: 5px; padding: 0 6px; border: 1px solid #ccd6e4; border-radius: 6px; color: #42516a; background: rgba(255,255,255,.97); box-shadow: 0 3px 9px rgba(23,34,53,.13); transform: translate(-50%,-50%); text-align: left; }
+.node-pin:hover { z-index: 9; border-color: var(--blue); background: #f2f6ff; box-shadow: 0 4px 12px rgba(39,100,231,.2); }
+.node-pin-dot { width: 9px; height: 9px; flex: none; border: 2px solid white; border-radius: 50%; background: var(--pin-color); box-shadow: 0 0 0 1px #65748a; }
+.node-pin b { flex: none; color: #98a4b5; font: 8px ui-monospace, monospace; }
+.node-pin-name { min-width: 0; overflow: hidden; color: #26344a; font: 750 9px ui-monospace, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.node-pin i { margin-left: auto; color: #8490a1; font-size: 9px; font-style: normal; }
+.node-pin.pending { border-color: var(--orange); background: #fff4ec; box-shadow: 0 0 0 2px rgba(240,124,53,.18), 0 4px 12px rgba(64,35,18,.14); }
+.node-pin.pending .node-pin-name { color: #b65419; }
+.node-pin.connected { border-color: #aebee0; background: #f3f6fc; }
+.node-pin.connected i { color: var(--blue); font-weight: 750; }
+.port-mode-hint { margin: -2px 0 12px; color: var(--muted); font-size: 9px; line-height: 1.6; }
 .assembly-empty { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; pointer-events: none; color: var(--muted); }
 .assembly-empty h3 { color: var(--ink); margin: 18px 0 3px; }
 .assembly-empty p { margin: 0; font-size: 12px; }

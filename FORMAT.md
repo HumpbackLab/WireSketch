@@ -2,7 +2,7 @@
 
 WireSketch 使用两类 JSON 文件：PCB 描述文件和装配体描述文件。两者都面向人类、程序和 AI，字段语义稳定，不依赖界面实现细节。
 
-PCB 当前 `schemaVersion` 为 `1.1.0`，装配体当前为 `1.2.0`。`schema` URN 中的 `1.0` 和顶层 `version: 1` 表示兼容主版本；1.1 新增的方向与节点变换字段、1.2 新增的导线显示字段均提供旧文件默认值。
+PCB 当前 `schemaVersion` 为 `1.1.0`，装配体当前为 `1.3.0`。`schema` URN 中的 `1.0` 和顶层 `version: 1` 表示兼容主版本；1.1 新增方向与节点变换字段，1.2 新增导线显示字段，1.3 新增端口连接模式和连接类型；这些字段均提供旧文件默认值。
 
 - PCB Schema：[schemas/pcb.schema.json](schemas/pcb.schema.json)
 - 装配体 Schema：[schemas/assembly.schema.json](schemas/assembly.schema.json)
@@ -84,6 +84,8 @@ wireDefaults ──────────── connections[].pinMap[].style
 `connections` 表示接口到接口的线束。`from` 和 `to` 用来确定 `pinMap` 的书写方向，不一定表示电流或信号方向。空的 `pinMap` 表示已知接口相连，但具体线序尚未定义。
 
 装配体 1.2 增加可选的 `wireDefaults`、`connections[].gap`、`connections[].pinMap[].label` 和 `connections[].pinMap[].style`。`wireDefaults` 控制全局线宽、默认信号标签间距、默认导线间距、折线圆角及两端信号标签；`connections[].gap` 可覆盖一组线束的导线间距。每个针脚映射代表一根实际信号线，其 `style` 可以覆盖线宽、圆角和标签显示，`label` 非空时显示在该信号线中间。旧文件省略这些字段时使用 `2.2` 线宽、`6` 标签间距、`6` 导线间距、直角折线并显示两端标签。
+
+装配体 1.3 增加 `nodes[].interfaceConnectionModes` 和 `connections[].mode`。端口未列入 `interfaceConnectionModes` 时默认为整束模式；值为 `signal` 时，可与同样开启该模式的对端逐 Pin 建立连接。`connections[].mode` 为 `bundle` 时整束创建和删除，为 `signal` 时表示由手动选择的 Pin 对组成的连接组，其中每根信号线可独立删除。旧连接省略 `mode` 时按 `bundle` 处理。
 
 `layout.routing` 推荐使用 `hybrid`：接口附近保持短直线引出，中间走廊无障碍时使用平行斜线，被板卡阻挡时才切换为正交避障。`orthogonal` 和 `manual` 保留用于外部工具表达布局意图。
 
