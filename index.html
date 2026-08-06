@@ -139,7 +139,19 @@
             <div class="toolbar-actions">
               <button class="secondary-btn" id="clearAssemblyBtn">清空</button>
               <button class="secondary-btn accent" id="autoLayoutBtn">✦ 自动美化布局</button>
-              <button class="secondary-btn" id="renderAssemblyBtn">导出图片</button>
+              <label class="export-scale-control" title="选择导出格式和 PNG 分辨率倍率">
+                <select id="exportFormat" aria-label="图片导出格式">
+                  <option value="png">PNG</option>
+                  <option value="svg">SVG</option>
+                </select>
+                <select id="exportScale" aria-label="PNG 导出分辨率倍率">
+                  <option value="1">1×</option>
+                  <option value="2">2×</option>
+                  <option value="3">3×</option>
+                  <option value="4" selected>4×</option>
+                </select>
+              </label>
+              <button class="secondary-btn" id="renderAssemblyBtn">导出 PNG</button>
               <button class="primary-btn" id="exportAssemblyBtn">导出装配体</button>
             </div>
           </div>

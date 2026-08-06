@@ -1118,7 +1118,7 @@
       return `<g transform="translate(${node.x} ${node.y})"><g transform="${transform}">${image}</g>${generatedName}</g>`;
     }).join('');
 
-    return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><defs><filter id="shadow" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="5" stdDeviation="5" flood-color="#263951" flood-opacity=".16"/></filter></defs><rect width="100%" height="100%" fill="#fff"/><text x="${padding}" y="38" font-size="20" font-weight="800" fill="#111">${escapeXml(state.assembly.name)}</text><text x="${width-padding}" y="37" text-anchor="end" font-size="10" fill="#626b75">${nodes.length} 块板卡 · ${state.assembly.connections.length} 组线束</text><g transform="translate(${tx} ${ty})"><g>${wires}</g><g>${nodeMarkup}</g></g></svg>`;
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><defs><filter id="shadow" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="5" stdDeviation="5" flood-color="#263951" flood-opacity=".16"/></filter></defs><rect width="100%" height="100%" fill="#fff"/><text x="${padding}" y="38" font-size="20" font-weight="800" fill="#111">${escapeXml(state.assembly.name)}</text><g transform="translate(${tx} ${ty})"><g>${wires}</g><g>${nodeMarkup}</g></g></svg>`;
   }
 
   function renderAssemblyDocumentSvg(documentData) {
@@ -1141,16 +1141,33 @@
       const svgBlob=new Blob([svg],{type:'image/svg+xml;charset=utf-8'});
       const url=URL.createObjectURL(svgBlob), image=new Image();
       await new Promise((resolve,reject)=>{image.onload=resolve;image.onerror=reject;image.src=url;});
-      const scale=Math.min(2,8000/image.width,8000/image.height);
-      const canvas=document.createElement('canvas');canvas.width=Math.round(image.width*scale);canvas.height=Math.round(image.height*scale);
-      const context=canvas.getContext('2d');context.scale(scale,scale);context.drawImage(image,0,0);
+      const scale=Math.max(1,Math.min(4,Number($('#exportScale').value)||4));
+      const outputWidth=Math.round(image.width*scale),outputHeight=Math.round(image.height*scale);
+      if(outputWidth>12000||outputHeight>12000){URL.revokeObjectURL(url);throw new RangeError(`导出尺寸 ${outputWidth} × ${outputHeight} 超过 12000 px`);}
+      const canvas=document.createElement('canvas');canvas.width=outputWidth;canvas.height=outputHeight;
+      const context=canvas.getContext('2d');context.imageSmoothingEnabled=true;context.imageSmoothingQuality='high';context.scale(scale,scale);context.drawImage(image,0,0);
       URL.revokeObjectURL(url);
       const png=await new Promise(resolve=>canvas.toBlob(resolve,'image/png',.96));
       if(!png)throw new Error('PNG encode failed');
       downloadBlob(png,`${safeFileName(state.assembly.name)}.png`);
       toast(`图片已导出 · ${canvas.width} × ${canvas.height}`);
     } catch(error) {
-      console.error(error);toast('图片渲染失败，请检查板卡图片格式');
+      console.error(error);toast(error instanceof RangeError?`${error.message}，请选择较低倍率`:'图片渲染失败，请检查板卡图片格式');
+    } finally {button.disabled=false;button.textContent=original;}
+  }
+
+  async function exportAssemblySvg() {
+    if(!state.assembly.nodes.length)return toast('请先向装配体中添加板卡');
+    const button=$('#renderAssemblyBtn'),original=button.textContent;
+    button.disabled=true;button.textContent='生成中…';
+    try {
+      const usedBoards=[...new Set(state.assembly.nodes.map(n=>n.boardId))].map(id=>state.boards.find(b=>b.id===id)).filter(Boolean);
+      await Promise.all(usedBoards.map(ensureBoardImageSize));
+      saveState();
+      downloadBlob(new Blob([buildAssemblySvg()],{type:'image/svg+xml;charset=utf-8'}),`${safeFileName(state.assembly.name)}.svg`);
+      toast('SVG 已导出');
+    } catch(error) {
+      console.error(error);toast('SVG 导出失败，请检查板卡图片格式');
     } finally {button.disabled=false;button.textContent=original;}
   }
 
@@ -1209,7 +1226,9 @@
     $('#importBoardsBtn').onclick=()=>$('#importBoardsInput').click();$('#importBoardsInput').onchange=e=>{importBoards([...e.target.files]);e.target.value='';};
     $('#assemblyImportBoardsBtn').onclick=()=>$('#assemblyImportBoardsInput').click();$('#assemblyImportBoardsInput').onchange=e=>{importBoards([...e.target.files]);e.target.value='';};
     $('#assemblyName').oninput=e=>{state.assembly.name=e.target.value||'新建连接图';saveState();};
-    $('#autoLayoutBtn').onclick=autoLayout;$('#renderAssemblyBtn').onclick=renderAssemblyImage;$('#exportAssemblyBtn').onclick=exportAssembly;
+    const syncExportControls=()=>{const svg=$('#exportFormat').value==='svg';$('#exportScale').disabled=svg;$('#renderAssemblyBtn').textContent=svg?'导出 SVG':'导出 PNG';};
+    $('#exportFormat').onchange=syncExportControls;syncExportControls();
+    $('#autoLayoutBtn').onclick=autoLayout;$('#renderAssemblyBtn').onclick=()=>$('#exportFormat').value==='svg'?exportAssemblySvg():renderAssemblyImage();$('#exportAssemblyBtn').onclick=exportAssembly;
     $('#clearAssemblyBtn').onclick=()=>{if(!state.assembly.nodes.length||confirm('确定清空当前装配画布吗？')){state.assembly.nodes=[];state.assembly.connections=[];selectedNodeId=null;selectedWireId=null;selectedWirePinKey=null;saveState();renderAssembly();}};
     $('#importAssemblyBtn').onclick=()=>$('#importAssemblyInput').click();$('#importAssemblyInput').onchange=e=>{if(e.target.files[0])importAssembly(e.target.files[0]);e.target.value='';};
     $('#defaultWireWidth').oninput=e=>{const value=Math.max(1,Math.min(8,+e.target.value||DEFAULT_WIRE_STYLE.width));updateAssemblyWireDefaults({width:value});$('#defaultWireWidthValue').value=value.toFixed(1);saveState();renderWires();};

@@ -65,6 +65,11 @@ main, .workspace { height: calc(100vh - 68px); }
 .title-input { font-size: 20px; font-weight: 750; border: 1px solid transparent; padding: 1px 5px; margin-left: -5px; color: var(--ink); width: 360px; border-radius: 5px; outline: 0; }
 .title-input:focus { border-color: #b7cbf7; background: #f7f9ff; }
 .toolbar-actions { display: flex; gap: 9px; align-items: center; }
+.export-scale-control { height: 36px; display: flex; align-items: center; overflow: hidden; border: 1px solid var(--line); border-radius: 7px; background: white; color: #7a8799; font-size: 9px; font-weight: 750; }
+.export-scale-control select { height: 100%; min-width: 50px; padding: 0 6px; border: 0; outline: 0; color: #445169; background: white; font-size: 12px; font-weight: 700; cursor: pointer; }
+.export-scale-control select + select { border-left: 1px solid var(--line); }
+.export-scale-control select:disabled { color: #a5afbd; background: #f5f7fa; cursor: not-allowed; }
+.export-scale-control:focus-within { border-color: #7ba2f6; box-shadow: 0 0 0 3px rgba(39,100,231,.08); }
 .editor-content { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(480px, 1fr) 310px; }
 .canvas-section { min-width: 0; padding: 18px 24px 14px; display: flex; flex-direction: column; }
 .section-tip { height: 30px; display: flex; align-items: center; gap: 9px; color: #536179; font-size: 12px; font-weight: 650; }
