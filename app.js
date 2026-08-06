@@ -6,6 +6,14 @@
   const PCB_SCHEMA_ID = 'urn:wiresketch:schema:pcb:1.0';
   const ASSEMBLY_SCHEMA_ID = 'urn:wiresketch:schema:assembly:1.0';
   const PIN_COLORS = ['#f05e55', '#30343b', '#f2b642', '#4c8beb', '#40ae79', '#9b6bdf', '#eb7ab1', '#59adb4'];
+  const INTERFACE_TYPE_DEFAULT_PINS = {
+    uart: ['VCC', 'GND', 'RX', 'TX'],
+    i2c: ['VCC', 'GND', 'SCL', 'SDA'],
+    spi: ['VCC', 'GND', 'SCLK', 'MISO', 'MOSI', 'CSN'],
+    power: ['V+', 'G'],
+    usb: ['VCC', 'GND', 'DP', 'DN']
+  };
+  const DEFAULT_WIRE_STYLE = {width:2.2, gap:6, showFromLabels:true, showToLabels:true};
   const NODE = { width: 230, height: 215, imageX: 15, imageY: 10, imageWidth: 200, imageHeight: 170 };
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -44,11 +52,13 @@
   let selectedInterfaceId = null;
   let selectedNodeId = null;
   let selectedWireId = null;
+  let selectedWirePinKey = null;
   let pendingPort = null;
   let zoom = 1;
   let boardZoom = null;
   let boardRenderedScale = 1;
   let drawStart = null;
+  let interfaceDragState = null;
   let dragState = null;
 
   function loadState() {
@@ -128,6 +138,24 @@
   function nodeScale(node) {
     const scale=Number(node?.scale);
     return Number.isFinite(scale)?Math.max(.5,Math.min(2,scale)):1;
+  }
+  function assemblyWireDefaults() {
+    const configured=state.assembly.wireDefaults||{};
+    return {
+      width:Math.max(1,Math.min(8,Number(configured.width)||DEFAULT_WIRE_STYLE.width)),
+      gap:Math.max(2,Math.min(16,Number(configured.gap)||DEFAULT_WIRE_STYLE.gap)),
+      showFromLabels:configured.showFromLabels!==false,
+      showToLabels:configured.showToLabels!==false
+    };
+  }
+  function signalWireStyle(signal) {
+    const defaults=assemblyWireDefaults(),configured=signal?.style||{};
+    return {
+      width:Math.max(1,Math.min(8,Number(configured.width)||defaults.width)),
+      gap:defaults.gap,
+      showFromLabels:typeof configured.showFromLabels==='boolean'?configured.showFromLabels:defaults.showFromLabels,
+      showToLabels:typeof configured.showToLabels==='boolean'?configured.showToLabels:defaults.showToLabels
+    };
   }
 
   function switchView(view) {
@@ -243,9 +271,40 @@
       const side=pinOneSide(i),rotation=interfaceRotation(i);
       return `<button class="interface-box pin1-${side} ${i.id === selectedInterfaceId ? 'selected' : ''}" data-id="${i.id}" data-label="${escapeHtml(i.name)} · ${i.pins.length}P · ${rotation}°" style="left:${i.rect.x*100}%;top:${i.rect.y*100}%;width:${i.rect.w*100}%;height:${i.rect.h*100}%"><span class="pin-one-marker pin-one-${side}" title="Pin 1">P1</span></button>`;
     }).join('');
-    $$('.interface-box', overlay).forEach(el => el.onpointerdown = e => {
-      e.stopPropagation(); selectedInterfaceId = el.dataset.id; renderInterfaces(); renderInterfaceForm();
-    });
+    $$('.interface-box', overlay).forEach(el => el.onpointerdown = onInterfacePointerDown);
+  }
+
+  function onInterfacePointerDown(e) {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    e.preventDefault();
+    const intf=currentBoard()?.interfaces.find(i=>i.id===e.currentTarget.dataset.id);
+    const overlay=$('#interfaceOverlay'),r=overlay.getBoundingClientRect();
+    if(!intf||!r.width||!r.height)return;
+    selectedInterfaceId=intf.id;
+    interfaceDragState={id:intf.id,startClientX:e.clientX,startClientY:e.clientY,startX:intf.rect.x,startY:intf.rect.y,overlayWidth:r.width,overlayHeight:r.height};
+    $$('.interface-box',overlay).forEach(box=>box.classList.toggle('selected',box.dataset.id===intf.id));
+    renderInterfaceForm();
+    $('#imageStage').setPointerCapture(e.pointerId);
+  }
+
+  function moveInterface(e) {
+    if(!interfaceDragState)return false;
+    const intf=currentBoard()?.interfaces.find(i=>i.id===interfaceDragState.id);
+    if(!intf)return false;
+    intf.rect.x=Math.max(0,Math.min(1-intf.rect.w,interfaceDragState.startX+(e.clientX-interfaceDragState.startClientX)/interfaceDragState.overlayWidth));
+    intf.rect.y=Math.max(0,Math.min(1-intf.rect.h,interfaceDragState.startY+(e.clientY-interfaceDragState.startClientY)/interfaceDragState.overlayHeight));
+    const el=$$('.interface-box').find(box=>box.dataset.id===intf.id);
+    if(el){el.style.left=`${intf.rect.x*100}%`;el.style.top=`${intf.rect.y*100}%`;}
+    return true;
+  }
+
+  function endInterfaceDrag() {
+    if(!interfaceDragState)return false;
+    interfaceDragState=null;
+    saveState();
+    renderInterfaces();
+    return true;
   }
 
   function renderInterfaceForm() {
@@ -263,6 +322,12 @@
   function renderPins(intf) {
     $('#pinList').innerHTML = intf.pins.map((pin, idx) => `<label class="pin-row"><span>P${idx+1}</span><input value="${escapeHtml(pin)}" data-index="${idx}" placeholder="信号名称"><i class="pin-color" style="background:${PIN_COLORS[idx % PIN_COLORS.length]}"></i></label>`).join('');
     $$('#pinList input').forEach(input => input.oninput = () => { intf.pins[+input.dataset.index] = input.value; saveState(); });
+  }
+
+  function applyInterfaceTypeDefaults(intf, type) {
+    intf.type = type;
+    const defaultPins = INTERFACE_TYPE_DEFAULT_PINS[type];
+    if (defaultPins) intf.pins = [...defaultPins];
   }
 
   function newBoard() {
@@ -315,6 +380,7 @@
   }
 
   function onStagePointerMove(e) {
+    if (moveInterface(e)) return;
     if (!drawStart) return;
     const overlay = $('#interfaceOverlay'), r = overlay.getBoundingClientRect();
     const x = Math.max(0, Math.min(1, (e.clientX-r.left)/r.width)), y = Math.max(0, Math.min(1, (e.clientY-r.top)/r.height));
@@ -323,6 +389,7 @@
   }
 
   function onStagePointerUp(e) {
+    if (endInterfaceDrag()) return;
     if (!drawStart) return;
     const overlay = $('#interfaceOverlay'), r = overlay.getBoundingClientRect();
     const x = Math.max(0, Math.min(1, (e.clientX-r.left)/r.width)), y = Math.max(0, Math.min(1, (e.clientY-r.top)/r.height));
@@ -384,20 +451,26 @@
     const boards=[...new Set(state.assembly.nodes.map(n=>n.boardId))].map(id=>state.boards.find(b=>b.id===id)).filter(Boolean);
     return {
       schema:ASSEMBLY_SCHEMA_ID,
-      schemaVersion:'1.1.0',
+      schemaVersion:'1.2.0',
       kind:'wiresketch/assembly',
       version:1,
       id:state.assembly.id,
       name:state.assembly.name,
       description:state.assembly.description||'',
       layout:{origin:'top-left',axisX:'right',axisY:'down',unit:'diagram-px',routing:'hybrid'},
+      wireDefaults:assemblyWireDefaults(),
       nodes:state.assembly.nodes.map(node=>({id:node.id,boardId:node.boardId,label:node.label,x:node.x,y:node.y,rotation:nodeRotation(node),flipX:nodeFlipX(node),scale:nodeScale(node)})),
       connections:state.assembly.connections.map(connection=>({
         id:connection.id,
         description:connection.description||'',
         from:{nodeId:connection.from.nodeId,interfaceId:connection.from.interfaceId},
         to:{nodeId:connection.to.nodeId,interfaceId:connection.to.interfaceId},
-        pinMap:(connection.pinMap||[]).map(pair=>({from:+pair.from,to:+pair.to}))
+        pinMap:(connection.pinMap||[]).map(pair=>({
+          from:+pair.from,
+          to:+pair.to,
+          ...(pair.label?{label:pair.label}:{}),
+          ...(pair.style?{style:{...pair.style}}:{})
+        }))
       })),
       embeddedBoards:boards.map(toPcbDocument)
     };
@@ -456,7 +529,7 @@
       return `<article class="board-node ${node.id===selectedNodeId?'selected':''}" data-id="${node.id}" style="left:${node.x}px;top:${node.y}px"><div class="node-body">${imageSource?`<img src="${imageSource}" data-board="${board.id}" alt="" style="left:${source.x}px;top:${source.y}px;width:${source.width}px;height:${source.height}px;transform:rotate(${rotation}deg) scaleX(${scaleX});transform-origin:center">`:`<div class="node-placeholder" style="transform:rotate(${rotation}deg) scaleX(${scaleX})"></div>`}${generatedName}</div><footer class="node-header"><strong>${escapeHtml(node.label)}</strong><button class="node-action node-scale-down" title="缩小板卡">−</button><span class="node-scale-label">${Math.round(nodeScale(node)*100)}%</span><button class="node-action node-scale-up" title="放大板卡">＋</button><button class="node-action node-flip" title="水平翻转">⇆</button><button class="node-action node-rotate" title="顺时针旋转 90°">↻</button><button class="node-action node-remove" title="移除板卡">×</button></footer>${ports}</article>`;
     }).join('');
     $$('.board-node').forEach(nodeEl => {
-      nodeEl.onpointerdown = e => { selectedNodeId = nodeEl.dataset.id; selectedWireId = null; if (!e.target.closest('.node-port,.node-action')) startNodeDrag(e, nodeEl.dataset.id); renderSelection(); };
+      nodeEl.onpointerdown = e => { selectedNodeId = nodeEl.dataset.id; selectedWireId = null;selectedWirePinKey=null; if (!e.target.closest('.node-port,.node-action')) startNodeDrag(e, nodeEl.dataset.id); renderSelection(); };
       $('.node-scale-down', nodeEl).onclick = e => { e.stopPropagation(); resizeNode(nodeEl.dataset.id,-.1); };
       $('.node-scale-up', nodeEl).onclick = e => { e.stopPropagation(); resizeNode(nodeEl.dataset.id,.1); };
       $('.node-flip', nodeEl).onclick = e => { e.stopPropagation(); flipNode(nodeEl.dataset.id); };
@@ -481,12 +554,60 @@
       return total+(from.intf&&to.intf?connectionPinPairs(connection,from.intf,to.intf).length:0);
     },0);
     $('#zoomLabel').textContent = `${Math.round(zoom*100)}%`;
+    renderAssemblyProperties();
     requestAnimationFrame(renderWires);
   }
 
   function renderSelection() {
     $$('.board-node').forEach(n => n.classList.toggle('selected', n.dataset.id === selectedNodeId));
-    $$('.wire-group').forEach(w => w.classList.toggle('selected', w.dataset.id === selectedWireId));
+    $$('.signal-wire').forEach(w => w.classList.toggle('selected', w.closest('.wire-group')?.dataset.id===selectedWireId&&w.dataset.pinKey===selectedWirePinKey));
+    renderAssemblyProperties();
+  }
+
+  function wirePinKey(pair) { return `${pair.from}:${pair.to}`; }
+
+  function selectedSignal() {
+    const connection=state.assembly.connections.find(item=>item.id===selectedWireId);if(!connection)return null;
+    const from=endpointDetails(connection.from),to=endpointDetails(connection.to);if(!from.intf||!to.intf)return null;
+    const signal=connectionPinPairs(connection,from.intf,to.intf).find(pair=>wirePinKey(pair)===selectedWirePinKey);
+    return signal?{connection,signal,from,to}:null;
+  }
+
+  function editableSelectedSignal() {
+    const selected=selectedSignal();if(!selected)return null;
+    if(!selected.connection.pinMap?.length){
+      selected.connection.pinMap=connectionPinPairs(selected.connection,selected.from.intf,selected.to.intf).map(pair=>({from:pair.from,to:pair.to}));
+    }
+    return selected.connection.pinMap.find(pair=>wirePinKey(pair)===selectedWirePinKey)||null;
+  }
+
+  function renderAssemblyProperties() {
+    const defaults=assemblyWireDefaults();
+    $('#defaultWireWidth').value=defaults.width;
+    $('#defaultWireGap').value=defaults.gap;
+    $('#defaultShowFromLabels').checked=defaults.showFromLabels;
+    $('#defaultShowToLabels').checked=defaults.showToLabels;
+    const selected=selectedSignal();
+    $('#wirePropertyEmpty').classList.toggle('hidden',!!selected);
+    $('#wirePropertyForm').classList.toggle('hidden',!selected);
+    if(!selected)return;
+    const {signal,from,to}=selected,style=signalWireStyle(signal);
+    $('#wireEndpointSummary').innerHTML=`<b>端点 1</b> ${escapeHtml(from.node?.label||'未知板卡')} / ${escapeHtml(from.intf?.name||'未知接口')} / ${escapeHtml(signal.fromName)}<br><b>端点 2</b> ${escapeHtml(to.node?.label||'未知板卡')} / ${escapeHtml(to.intf?.name||'未知接口')} / ${escapeHtml(signal.toName)}`;
+    $('#wireDisplayName').value=signal.label||'';
+    $('#wireWidth').value=signal.style?.width??'';
+    $('#wireShowFromLabels').checked=style.showFromLabels;
+    $('#wireShowToLabels').checked=style.showToLabels;
+  }
+
+  function deleteSelectedWire() {
+    const selected=selectedSignal();if(!selected)return;
+    editableSelectedSignal();
+    selected.connection.pinMap=selected.connection.pinMap.filter(pair=>wirePinKey(pair)!==selectedWirePinKey);
+    if(!selected.connection.pinMap.length)state.assembly.connections=state.assembly.connections.filter(connection=>connection!==selected.connection);
+    selectedWireId=null;
+    selectedWirePinKey=null;
+    saveState();
+    renderAssembly();
   }
 
   function getBoardImageGeometry(board,node) {
@@ -623,6 +744,30 @@
     return `<g class="pin-tag" pointer-events="none"><rect x="${x}" y="${y}" width="${width}" height="${height}" rx="1.5" fill="${color}"/><text x="${centerX}" y="${centerY}" text-anchor="middle" dominant-baseline="central" font-size="${fontSize}" font-weight="800" fill="${textColor}"${transform}>${escapeXml(displayPinName(label))}</text></g>`;
   }
 
+  function pathMidpoint(path) {
+    const values=(path.match(/-?\d+(?:\.\d+)?/g)||[]).map(Number),points=[];
+    for(let index=0;index<values.length;index+=2)points.push({x:values[index],y:values[index+1]});
+    if(points.length<2)return points[0]||{x:0,y:0};
+    const lengths=points.slice(1).map((point,index)=>Math.hypot(point.x-points[index].x,point.y-points[index].y));
+    const target=lengths.reduce((sum,length)=>sum+length,0)/2;
+    let traversed=0;
+    for(let index=0;index<lengths.length;index++){
+      if(traversed+lengths[index]>=target){
+        const ratio=lengths[index]?(target-traversed)/lengths[index]:0;
+        return {x:points[index].x+(points[index+1].x-points[index].x)*ratio,y:points[index].y+(points[index+1].y-points[index].y)*ratio};
+      }
+      traversed+=lengths[index];
+    }
+    return points.at(-1);
+  }
+
+  function wireMiddleLabelMarkup(label,path) {
+    const value=String(label||'').trim();if(!value||!path)return '';
+    const display=value.length>24?`${value.slice(0,23)}…`:value;
+    const point=pathMidpoint(path),width=Math.max(32,display.length*7+16);
+    return `<g class="wire-middle-label"><rect x="${point.x-width/2}" y="${point.y-10}" width="${width}" height="20" rx="5"/><text x="${point.x}" y="${point.y}" text-anchor="middle" dominant-baseline="central">${escapeXml(display)}</text></g>`;
+  }
+
   function portPoint(endpoint,pinNumber) {
     const node = state.assembly.nodes.find(n => n.id === endpoint.nodeId), board = state.boards.find(b => b.id === node?.boardId), intf = board?.interfaces.find(i => i.id === endpoint.interfaceId);
     if (!node || !intf) return null;
@@ -710,15 +855,16 @@
   function renderWires() {
     $('#wireLayer').innerHTML = state.assembly.connections.map(c => {
       const from=endpointDetails(c.from),to=endpointDetails(c.to);if(!from.intf||!to.intf)return '';
-      const pairs=connectionPinPairs(c,from.intf,to.intf);
+      const pairs=connectionPinPairs(c,from.intf,to.intf),gap=assemblyWireDefaults().gap;
       const lines=pairs.map((pair,index)=>{
         const a=portPoint(c.from,pair.from),b=portPoint(c.to,pair.to);if(!a||!b)return '';
-        const d=routePath(a,b,(index-(pairs.length-1)/2)*6);
-        return `<path class="wire-hit" d="${d}"/><path class="wire-outline" d="${d}"/><path class="wire-path" d="${d}" stroke="${pair.color}"/>${pinTagMarkup(a,pair.fromName,pair.color)}${pinTagMarkup(b,pair.toName,pair.color)}`;
+        const d=routePath(a,b,(index-(pairs.length-1)/2)*gap),style=signalWireStyle(pair),pinKey=wirePinKey(pair);
+        const selected=c.id===selectedWireId&&pinKey===selectedWirePinKey?'selected':'';
+        return `<g class="signal-wire ${selected}" data-pin-key="${pinKey}" style="--wire-width:${style.width}px;--wire-outline-width:${style.width+2.8}px"><path class="wire-hit" d="${d}"/><path class="wire-outline" d="${d}"/><path class="wire-path" d="${d}" stroke="${pair.color}"/>${style.showFromLabels?pinTagMarkup(a,pair.fromName,pair.color):''}${style.showToLabels?pinTagMarkup(b,pair.toName,pair.color):''}${wireMiddleLabelMarkup(pair.label,d)}</g>`;
       }).join('');
-      return `<g class="wire-group ${c.id===selectedWireId?'selected':''}" data-id="${c.id}">${lines}</g>`;
+      return `<g class="wire-group" data-id="${c.id}">${lines}</g>`;
     }).join('');
-    $$('.wire-group').forEach(w => w.onclick = e => { e.stopPropagation(); selectedWireId=w.dataset.id; selectedNodeId=null; renderSelection(); });
+    $$('.signal-wire').forEach(w => w.onclick = e => { e.stopPropagation(); selectedWireId=w.closest('.wire-group').dataset.id;selectedWirePinKey=w.dataset.pinKey;selectedNodeId=null;renderSelection(); });
   }
 
   function startNodeDrag(e, nodeId) {
@@ -759,20 +905,20 @@
 
   function rotateNode(id) {
     const node=state.assembly.nodes.find(item=>item.id===id);if(!node)return;
-    node.rotation=(nodeRotation(node)+90)%360;selectedNodeId=id;selectedWireId=null;
+    node.rotation=(nodeRotation(node)+90)%360;selectedNodeId=id;selectedWireId=null;selectedWirePinKey=null;
     saveState();renderAssembly();toast(`板卡已旋转到 ${node.rotation}°`);
   }
 
   function flipNode(id) {
     const node=state.assembly.nodes.find(item=>item.id===id);if(!node)return;
-    node.flipX=!nodeFlipX(node);selectedNodeId=id;selectedWireId=null;
+    node.flipX=!nodeFlipX(node);selectedNodeId=id;selectedWireId=null;selectedWirePinKey=null;
     saveState();renderAssembly();toast(node.flipX?'板卡已水平翻转':'板卡已恢复原方向');
   }
 
   function resizeNode(id,delta) {
     const node=state.assembly.nodes.find(item=>item.id===id);if(!node)return;
     node.scale=Math.round(Math.max(.5,Math.min(2,nodeScale(node)+delta))*10)/10;
-    selectedNodeId=id;selectedWireId=null;saveState();renderAssembly();toast(`板卡大小 ${Math.round(node.scale*100)}%`);
+    selectedNodeId=id;selectedWireId=null;selectedWirePinKey=null;saveState();renderAssembly();toast(`板卡大小 ${Math.round(node.scale*100)}%`);
   }
 
   function autoLayout() {
@@ -841,10 +987,10 @@
     const nodes = state.assembly.nodes;
     const exportWireData=state.assembly.connections.flatMap(connection=>{
       const from=endpointDetails(connection.from),to=endpointDetails(connection.to);if(!from.intf||!to.intf)return [];
-      const pairs=connectionPinPairs(connection,from.intf,to.intf);
+      const pairs=connectionPinPairs(connection,from.intf,to.intf),gap=assemblyWireDefaults().gap;
       return pairs.map((pair,index)=>{
         const a=portPoint(connection.from,pair.from),b=portPoint(connection.to,pair.to);
-        return a&&b?{pair,a,b,d:routePath(a,b,(index-(pairs.length-1)/2)*6)}:null;
+        return a&&b?{connection,pair,a,b,style:signalWireStyle(pair),index,d:routePath(a,b,(index-(pairs.length-1)/2)*gap)}:null;
       }).filter(Boolean);
     });
     const visualBounds=nodes.map(node=>{
@@ -865,7 +1011,7 @@
     const height=Math.max(280,Math.ceil(maxY-minY+padding*2+headerHeight));
     const tx=padding-minX, ty=padding+headerHeight-minY;
 
-    const wires = exportWireData.map(({pair,a,b,d})=>`<g><path d="${d}" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/><path d="${d}" fill="none" stroke="${pair.color}" stroke-width="2.4" stroke-linecap="square" stroke-linejoin="miter"/>${pinTagMarkup(a,pair.fromName,pair.color)}${pinTagMarkup(b,pair.toName,pair.color)}</g>`).join('');
+    const wires = exportWireData.map(({pair,a,b,d,style})=>`<g><path d="${d}" fill="none" stroke="#fff" stroke-width="${style.width+2.8}" stroke-linecap="round" stroke-linejoin="round"/><path d="${d}" fill="none" stroke="${pair.color}" stroke-width="${style.width}" stroke-linecap="square" stroke-linejoin="miter"/>${style.showFromLabels?pinTagMarkup(a,pair.fromName,pair.color):''}${style.showToLabels?pinTagMarkup(b,pair.toName,pair.color):''}${wireMiddleLabelMarkup(pair.label,d)}</g>`).join('');
 
     const nodeMarkup = nodes.map(node => {
       const board=state.boards.find(b=>b.id===node.boardId); if(!board)return '';
@@ -924,7 +1070,7 @@
   function loadAssemblyDocument(doc) {
     if(doc?.kind!=='wiresketch/assembly'||!Array.isArray(doc.nodes))return false;
     (doc.embeddedBoards||[]).forEach(board=>{if(!state.boards.some(b=>b.id===board.id)){board.builtIn=false;if(board.source==='generated')refreshGeneratedBoard(board);state.boards.push(board);}});
-    state.assembly={...doc,embeddedBoards:undefined}; selectedNodeId=null;selectedWireId=null;pendingPort=null;saveState();renderComponentList();renderAssembly();toast('装配体已打开');
+    state.assembly={...doc,embeddedBoards:undefined}; selectedNodeId=null;selectedWireId=null;selectedWirePinKey=null;pendingPort=null;saveState();renderComponentList();renderAssembly();toast('装配体已打开');
     return true;
   }
 
@@ -955,10 +1101,10 @@
     $('#virtualBoardWidth').onchange=applyVirtualBoardSettings;
     $('#virtualBoardHeight').onchange=applyVirtualBoardSettings;
     $('#virtualBoardColor').oninput=applyVirtualBoardSettings;
-    $('#imageStage').onpointerdown=onStagePointerDown;$('#imageStage').onpointermove=onStagePointerMove;$('#imageStage').onpointerup=onStagePointerUp;
+    $('#imageStage').onpointerdown=onStagePointerDown;$('#imageStage').onpointermove=onStagePointerMove;$('#imageStage').onpointerup=onStagePointerUp;$('#imageStage').onpointercancel=onStagePointerUp;
     $('#imageStage').addEventListener('wheel',e=>{if(e.ctrlKey||e.metaKey){e.preventDefault();changeBoardZoom(e.deltaY<0?1.12:.89);}},{passive:false});
     $('#interfaceName').oninput=e=>{const i=currentInterface();i.name=e.target.value;saveState();renderInterfaces();renderBoardList();};
-    $('#interfaceType').onchange=e=>{currentInterface().type=e.target.value;saveState();};
+    $('#interfaceType').onchange=e=>{const i=currentInterface();applyInterfaceTypeDefaults(i,e.target.value);$('#pinCount').value=i.pins.length;saveState();renderPins(i);renderInterfaces();renderBoardList();};
     $('#interfaceRotation').onchange=e=>{const i=currentInterface();i.rotation=Number(e.target.value);saveState();renderInterfaces();if($('#assemblyView').classList.contains('active'))renderAssembly();};
     $('#pinCount').onchange=e=>{const i=currentInterface(),count=Math.max(1,Math.min(64,+e.target.value||1));while(i.pins.length<count)i.pins.push(`Pin ${i.pins.length+1}`);i.pins.length=count;e.target.value=count;saveState();renderPins(i);renderInterfaces();renderBoardList();};
     $('#deleteInterfaceBtn').onclick=deleteSelectedInterface;
@@ -968,18 +1114,28 @@
     $('#assemblyImportBoardsBtn').onclick=()=>$('#assemblyImportBoardsInput').click();$('#assemblyImportBoardsInput').onchange=e=>{importBoards([...e.target.files]);e.target.value='';};
     $('#assemblyName').oninput=e=>{state.assembly.name=e.target.value||'新建连接图';saveState();};
     $('#autoLayoutBtn').onclick=autoLayout;$('#renderAssemblyBtn').onclick=renderAssemblyImage;$('#exportAssemblyBtn').onclick=exportAssembly;
-    $('#clearAssemblyBtn').onclick=()=>{if(!state.assembly.nodes.length||confirm('确定清空当前装配画布吗？')){state.assembly.nodes=[];state.assembly.connections=[];saveState();renderAssembly();}};
+    $('#clearAssemblyBtn').onclick=()=>{if(!state.assembly.nodes.length||confirm('确定清空当前装配画布吗？')){state.assembly.nodes=[];state.assembly.connections=[];selectedNodeId=null;selectedWireId=null;selectedWirePinKey=null;saveState();renderAssembly();}};
     $('#importAssemblyBtn').onclick=()=>$('#importAssemblyInput').click();$('#importAssemblyInput').onchange=e=>{if(e.target.files[0])importAssembly(e.target.files[0]);e.target.value='';};
+    $('#defaultWireWidth').onchange=e=>{const defaults=assemblyWireDefaults();state.assembly.wireDefaults={...defaults,width:Math.max(1,Math.min(8,+e.target.value||DEFAULT_WIRE_STYLE.width))};saveState();renderAssemblyProperties();renderWires();};
+    $('#defaultWireGap').onchange=e=>{const defaults=assemblyWireDefaults();state.assembly.wireDefaults={...defaults,gap:Math.max(2,Math.min(16,+e.target.value||DEFAULT_WIRE_STYLE.gap))};saveState();renderAssemblyProperties();renderWires();};
+    $('#defaultShowFromLabels').onchange=e=>{state.assembly.wireDefaults={...assemblyWireDefaults(),showFromLabels:e.target.checked};saveState();renderAssemblyProperties();renderWires();};
+    $('#defaultShowToLabels').onchange=e=>{state.assembly.wireDefaults={...assemblyWireDefaults(),showToLabels:e.target.checked};saveState();renderAssemblyProperties();renderWires();};
+    $('#wireDisplayName').oninput=e=>{const signal=editableSelectedSignal();if(!signal)return;signal.label=e.target.value;saveState();renderWires();};
+    $('#wireWidth').onchange=e=>{const signal=editableSelectedSignal();if(!signal)return;signal.style=signal.style||{};if(e.target.value==='')delete signal.style.width;else signal.style.width=Math.max(1,Math.min(8,+e.target.value||assemblyWireDefaults().width));saveState();renderAssemblyProperties();renderWires();};
+    $('#wireShowFromLabels').onchange=e=>{const signal=editableSelectedSignal();if(!signal)return;signal.style={...(signal.style||{}),showFromLabels:e.target.checked};saveState();renderWires();};
+    $('#wireShowToLabels').onchange=e=>{const signal=editableSelectedSignal();if(!signal)return;signal.style={...(signal.style||{}),showToLabels:e.target.checked};saveState();renderWires();};
+    $('#resetWireStyleBtn').onclick=()=>{const signal=editableSelectedSignal();if(!signal)return;delete signal.style;saveState();renderAssemblyProperties();renderWires();};
+    $('#deleteWireBtn').onclick=deleteSelectedWire;
     const canvas=$('#assemblyCanvas');canvas.ondragover=e=>e.preventDefault();canvas.ondrop=e=>{e.preventDefault();const id=e.dataTransfer.getData('text/pcb-id'),r=canvas.getBoundingClientRect();if(id)addNode(id,{x:(e.clientX-r.left)/zoom-NODE.width/2,y:(e.clientY-r.top)/zoom-NODE.height/2});};
     canvas.onpointermove=moveNode;canvas.onpointerup=endNodeDrag;canvas.onpointercancel=endNodeDrag;
-    canvas.onclick=e=>{if(e.target===canvas||e.target.id==='nodeLayer'){selectedNodeId=null;selectedWireId=null;pendingPort=null;renderAssembly();}};
+    canvas.onclick=e=>{if(e.target===canvas||e.target.id==='nodeLayer'){selectedNodeId=null;selectedWireId=null;selectedWirePinKey=null;pendingPort=null;renderAssembly();}};
     $('#zoomInBtn').onclick=()=>{zoom=Math.min(1.5,zoom+.1);renderAssembly();};$('#zoomOutBtn').onclick=()=>{zoom=Math.max(.4,zoom-.1);renderAssembly();};
     document.onkeydown=e=>{
       if(!$('#assemblyView').classList.contains('active')||['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName))return;
       if((e.key==='r'||e.key==='R')&&selectedNodeId){e.preventDefault();rotateNode(selectedNodeId);return;}
       if((e.key==='f'||e.key==='F')&&selectedNodeId){e.preventDefault();flipNode(selectedNodeId);return;}
       if(e.key==='Delete'||e.key==='Backspace'){
-        if(selectedWireId){state.assembly.connections=state.assembly.connections.filter(c=>c.id!==selectedWireId);selectedWireId=null;saveState();renderAssembly();}
+        if(selectedWireId)deleteSelectedWire();
         else if(selectedNodeId)removeNode(selectedNodeId);
       }
     };

@@ -2,7 +2,7 @@
 
 WireSketch 使用两类 JSON 文件：PCB 描述文件和装配体描述文件。两者都面向人类、程序和 AI，字段语义稳定，不依赖界面实现细节。
 
-当前 `schemaVersion` 为 `1.1.0`。`schema` URN 中的 `1.0` 和顶层 `version: 1` 表示兼容主版本；1.1 新增的方向与节点变换字段均提供旧文件默认值。
+PCB 当前 `schemaVersion` 为 `1.1.0`，装配体当前为 `1.2.0`。`schema` URN 中的 `1.0` 和顶层 `version: 1` 表示兼容主版本；1.1 新增的方向与节点变换字段、1.2 新增的导线显示字段均提供旧文件默认值。
 
 - PCB Schema：[schemas/pcb.schema.json](schemas/pcb.schema.json)
 - 装配体 Schema：[schemas/assembly.schema.json](schemas/assembly.schema.json)
@@ -61,6 +61,9 @@ nodes[].id ───── connections[].from/to.nodeId
     ├── x / y             └── interfaceId → 对应 PCB interfaces[].id
     ├── rotation / flipX
     └── scale
+
+wireDefaults ──────────── connections[].pinMap[].style
+  全局导线默认值             单根信号线可选覆盖值
 ```
 
 `nodes` 是板卡定义的实例。同一种 PCB 可以出现多次，每个实例必须使用不同的节点 ID。`x`、`y` 只控制图面位置，不表达物理距离。
@@ -73,6 +76,8 @@ nodes[].id ───── connections[].from/to.nodeId
 
 `connections` 表示接口到接口的线束。`from` 和 `to` 用来确定 `pinMap` 的书写方向，不一定表示电流或信号方向。空的 `pinMap` 表示已知接口相连，但具体线序尚未定义。
 
+装配体 1.2 增加可选的 `wireDefaults`、`connections[].pinMap[].label` 和 `connections[].pinMap[].style`。`wireDefaults` 控制全局线宽、线间距及两端信号标签；每个针脚映射代表一根实际信号线，其 `style` 可以覆盖线宽和标签显示，`label` 非空时显示在该信号线中间。旧文件省略这些字段时使用 `2.2` 线宽、`6` 线间距并显示两端标签。
+
 `layout.routing` 推荐使用 `hybrid`：接口附近保持短直线引出，中间走廊无障碍时使用平行斜线，被板卡阻挡时才切换为正交避障。`orthogonal` 和 `manual` 保留用于外部工具表达布局意图。
 
 ## 修改与版本兼容
@@ -80,5 +85,5 @@ nodes[].id ───── connections[].from/to.nodeId
 - 增加描述文字、调整布局坐标属于兼容修改。
 - 修改接口 ID、节点 ID 时必须同步更新所有引用。
 - 修改 `pins` 顺序会改变物理含义，必须同步检查所有 `pinMap`。
-- WireSketch 仍可导入早期没有 `schema`、`schemaVersion`、`coordinateSystem`、`layout`、接口方向或节点变换字段的文件；重新导出后会补齐 1.1 格式字段。
+- WireSketch 仍可导入早期没有 `schema`、`schemaVersion`、`coordinateSystem`、`layout`、接口方向、节点变换或导线显示字段的文件；重新导出后 PCB 会补齐 1.1 字段，装配体会补齐 1.2 字段。
 - 未来破坏性变更会使用新的 `schema` URN 和主版本号，不会静默改变 1.x 的字段含义。

@@ -8,13 +8,14 @@
   "required": ["schema", "schemaVersion", "kind", "version", "id", "name", "layout", "nodes", "connections", "embeddedBoards"],
   "properties": {
     "schema": { "const": "urn:wiresketch:schema:assembly:1.0", "description": "Stable format identifier. Never translate or modify it." },
-    "schemaVersion": { "const": "1.1.0" },
+    "schemaVersion": { "enum": ["1.1.0", "1.2.0"], "description": "1.2.0 adds optional global and per-signal wire presentation settings." },
     "kind": { "const": "wiresketch/assembly" },
     "version": { "const": 1 },
     "id": { "$ref": "#/$defs/id" },
     "name": { "type": "string", "minLength": 1, "maxLength": 120 },
     "description": { "type": "string", "default": "" },
     "layout": { "$ref": "#/$defs/layout" },
+    "wireDefaults": { "$ref": "#/$defs/wireDefaults" },
     "nodes": {
       "type": "array",
       "description": "Board instances. Multiple nodes may reference the same boardId.",
@@ -75,7 +76,28 @@
       "required": ["from", "to"],
       "properties": {
         "from": { "type": "integer", "minimum": 1, "description": "1-based physical pin number on the from endpoint." },
-        "to": { "type": "integer", "minimum": 1, "description": "1-based physical pin number on the to endpoint." }
+        "to": { "type": "integer", "minimum": 1, "description": "1-based physical pin number on the to endpoint." },
+        "label": { "type": "string", "maxLength": 80, "default": "", "description": "Optional custom name rendered at the middle of this signal wire." },
+        "style": { "$ref": "#/$defs/signalStyle" }
+      }
+    },
+    "wireDefaults": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "width": { "type": "number", "minimum": 1, "maximum": 8, "default": 2.2 },
+        "gap": { "type": "number", "minimum": 2, "maximum": 16, "default": 6 },
+        "showFromLabels": { "type": "boolean", "default": true },
+        "showToLabels": { "type": "boolean", "default": true }
+      }
+    },
+    "signalStyle": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "width": { "type": "number", "minimum": 1, "maximum": 8 },
+        "showFromLabels": { "type": "boolean" },
+        "showToLabels": { "type": "boolean" }
       }
     },
     "connection": {

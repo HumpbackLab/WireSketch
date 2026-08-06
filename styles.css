@@ -80,7 +80,8 @@ main, .workspace { height: calc(100vh - 68px); }
 .image-workspace { position: relative; min-width: 100%; min-height: 100%; }
 #boardImage { display: block; position: absolute; min-width: 0; min-height: 0; object-fit: fill; box-shadow: 0 12px 28px rgba(25,36,55,.17); pointer-events: none; }
 .interface-overlay { position: absolute; pointer-events: none; }
-.interface-box { position: absolute; border: 2px solid #ff8b3d; background: rgba(255, 139, 61, .13); border-radius: 3px; pointer-events: auto; cursor: pointer; min-width: 4px; min-height: 4px; }
+.interface-box { position: absolute; border: 2px solid #ff8b3d; background: rgba(255, 139, 61, .13); border-radius: 3px; pointer-events: auto; cursor: grab; touch-action: none; min-width: 4px; min-height: 4px; }
+.interface-box:active { cursor: grabbing; }
 .interface-box::before { content: attr(data-label); position: absolute; left: -2px; bottom: calc(100% + 3px); white-space: nowrap; background: #e66b23; color: white; border-radius: 4px; padding: 2px 6px; font-weight: 700; font-size: 10px; box-shadow: 0 2px 6px rgba(120,53,13,.2); }
 .interface-box.pin1-top::before { top: calc(100% + 3px); bottom: auto; }
 .interface-box.selected { border-color: #2764e7; background: rgba(39,100,231,.16); box-shadow: 0 0 0 3px rgba(39,100,231,.15); }
@@ -129,21 +130,42 @@ main, .workspace { height: calc(100vh - 68px); }
 .component-card strong { display: block; font-size: 12px; }
 .component-card small { color: var(--muted); font-size: 9px; }
 .assembly-editor { min-width: 0; }
+.assembly-property-panel { width: 286px; flex: none; background: white; border-left: 1px solid var(--line); overflow: auto; }
+.assembly-property-heading { padding: 22px 20px 12px; border-bottom: 1px solid #edf0f4; }
+.assembly-property-heading h2 { margin: 2px 0 0; font-size: 18px; }
+.property-group { padding: 17px 20px; border-bottom: 1px solid #edf0f4; }
+.property-group h3 { margin: 0 0 13px; font-size: 12px; }
+.property-group label { display: block; margin-bottom: 12px; color: #5d6a7f; font-size: 10px; font-weight: 700; }
+.property-group input[type="number"], #wireDisplayName { width: 100%; height: 35px; margin-top: 5px; padding: 0 9px; border: 1px solid #d9e0e8; border-radius: 6px; color: var(--ink); background: white; outline: none; }
+.property-group input:focus { border-color: #7ba2f6; box-shadow: 0 0 0 3px rgba(39,100,231,.08); }
+.compact-field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+.check-field { display: flex !important; align-items: center; gap: 8px; min-height: 25px; margin-bottom: 6px !important; cursor: pointer; }
+.check-field input { width: 15px; height: 15px; margin: 0; accent-color: var(--blue); }
+.wire-property-group { min-height: 250px; }
+.compact-empty { padding: 25px 8px; text-align: center; color: var(--muted); }
+.compact-empty .empty-symbol { margin: auto; }
+.compact-empty p { margin: 10px 0 0; font-size: 11px; }
+.wire-endpoint-summary { margin: 0 0 13px; padding: 9px 10px; border-radius: 6px; background: var(--soft); color: #647188; font-size: 9px; line-height: 1.7; overflow-wrap: anywhere; }
+.wire-property-form .secondary-btn { margin: 7px 0 4px; }
+.assembly-editor .title-input { width: 260px; }
 .accent { color: var(--blue); border-color: #b9ccf4; background: #f3f7ff; }
 .assembly-canvas { flex: 1; min-height: 0; overflow: hidden; position: relative; background-color: #f7f8fa; background-image: radial-gradient(#cdd4de 1px, transparent 1px); background-size: 18px 18px; }
 .wire-layer, .node-layer { position: absolute; inset: 0; transform-origin: 0 0; }
 .wire-layer { overflow: visible; pointer-events: none; }
 .wire-group { pointer-events: stroke; cursor: pointer; }
 .wire-hit { stroke: transparent; stroke-width: 14; fill: none; pointer-events: stroke; }
-.wire-outline { stroke: rgba(255,255,255,.92); stroke-width: 5; fill: none; stroke-linecap: round; stroke-linejoin: round; }
-.wire-path { stroke-width: 2.2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
-.wire-group:hover .wire-path { stroke: #e86f29; stroke-width: 3.5; }
-.wire-group.selected .wire-path { stroke: var(--orange); }
+.wire-outline { stroke: rgba(255,255,255,.92); stroke-width: var(--wire-outline-width, 5); fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.wire-path { stroke-width: var(--wire-width, 2.2); fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.signal-wire:hover .wire-path { stroke: #e86f29; }
+.signal-wire.selected .wire-path { stroke: var(--orange); }
 .wire-group.mismatch .wire-path { stroke: var(--orange); stroke-dasharray: 6 5; }
 .wire-dot { fill: #fff; stroke: #5c79af; stroke-width: 2; }
 .wire-label { pointer-events: none; }
 .wire-label rect { fill: white; stroke: #cbd5e2; stroke-width: 1; }
 .wire-label text { fill: #62728a; font: 700 8px ui-sans-serif, system-ui, sans-serif; }
+.wire-middle-label { pointer-events: none; }
+.wire-middle-label rect { fill: #172235; stroke: white; stroke-width: 2; }
+.wire-middle-label text { fill: white; font: 750 9px ui-sans-serif, system-ui, sans-serif; }
 .pin-tag text { font-family: ui-sans-serif, system-ui, sans-serif; }
 .board-node { width: 230px; height: 215px; position: absolute; border: 1px solid transparent; border-radius: 8px; background: transparent; user-select: none; cursor: grab; }
 .board-node.selected { border-color: rgba(39,100,231,.65); background: rgba(39,100,231,.035); }
