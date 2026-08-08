@@ -194,7 +194,7 @@ Pin 3 → Pin 3
 
 ## JSON 描述格式
 
-当前装配体格式版本为 WireSketch `1.4.0`，分为两类文件：
+当前装配体格式版本为 WireSketch `1.6.0`，分为两类文件：
 
 - PCB 描述：`kind: "wiresketch/pcb"`
 - 装配体描述：`kind: "wiresketch/assembly"`

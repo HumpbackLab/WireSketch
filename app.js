@@ -14,6 +14,27 @@
     usb: ['VCC', 'GND', 'DP', 'DN']
   };
   const DEFAULT_WIRE_STYLE = {width:2.2, gap:6, routeGap:6, cornerRadius:0, showFromLabels:true, showToLabels:true};
+  const DEFAULT_TITLE_STYLE = {fontSize:20,fontFamily:'sans-serif',color:'#111827'};
+  const DEFAULT_FREE_TEXT_STYLE = {fontSize:16,fontFamily:'sans-serif',color:'#25334a'};
+  const FONT_FAMILIES = {
+    'sans-serif':'Inter,ui-sans-serif,system-ui,sans-serif',
+    serif:'Georgia,"Times New Roman",serif',
+    monospace:'ui-monospace,SFMono-Regular,Consolas,monospace',
+    Arial:'Arial,sans-serif',
+    Helvetica:'Helvetica,Arial,sans-serif',
+    Verdana:'Verdana,sans-serif',
+    Tahoma:'Tahoma,sans-serif',
+    Georgia:'Georgia,serif',
+    TimesNewRoman:'"Times New Roman",serif',
+    CourierNew:'"Courier New",monospace',
+    MicrosoftYaHei:'"Microsoft YaHei","微软雅黑",sans-serif',
+    PingFangSC:'"PingFang SC","苹方",sans-serif',
+    NotoSansSC:'"Noto Sans CJK SC","Noto Sans SC","思源黑体",sans-serif',
+    SimHei:'SimHei,"黑体",sans-serif',
+    SimSun:'SimSun,"宋体",serif',
+    KaiTi:'KaiTi,"楷体",serif',
+    FangSong:'FangSong,"仿宋",serif'
+  };
   const NODE = { width: 230, height: 215, imageX: 15, imageY: 10, imageWidth: 200, imageHeight: 170 };
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -48,12 +69,15 @@
   ];
 
   let state = loadState();
+  migrateAssemblyTextModel(state.assembly);
   let selectedBoardId = state.boards[0]?.id || null;
   let selectedInterfaceId = null;
   let selectedNodeId = null;
   let selectedWireId = null;
   let selectedWirePinKey = null;
   let selectedPort = null;
+  let selectedTextId = null;
+  let selectedItemKeys = new Set();
   let pendingPort = null;
   let zoom = 1;
   let boardZoom = null;
@@ -62,6 +86,7 @@
   let interfaceDragState = null;
   let dragState = null;
   let nameDragState = null;
+  let marqueeState = null;
   let ignoreCanvasClickUntil = 0;
   let transparentColorPicking = false;
   let imageRotationPreview = 0;
@@ -181,6 +206,36 @@
   function nodeFlipX(node) { return node?.flipX===true; }
   function nodeFixed(node) { return node?.fixed===true; }
   function nodeNameVisible(node) { return node?.showName!==false; }
+  function normalizedTextStyle(style,defaults) {
+    const fontSize=Number(style?.fontSize),fontFamily=FONT_FAMILIES[style?.fontFamily]?style.fontFamily:defaults.fontFamily,color=/^#[0-9a-f]{6}$/i.test(style?.color||'')?style.color:defaults.color;
+    return {fontSize:Number.isFinite(fontSize)?Math.max(8,Math.min(72,fontSize)):defaults.fontSize,fontFamily,color};
+  }
+  function textFontCss(style) { return FONT_FAMILIES[style.fontFamily]||FONT_FAMILIES['sans-serif']; }
+  function assemblyTextDefaults(assembly=state.assembly) { return normalizedTextStyle(assembly?.textDefaults,DEFAULT_FREE_TEXT_STYLE); }
+  function nodeNameStyle(node) { return normalizedTextStyle(node?.nameStyle,assemblyTextDefaults()); }
+  function freeTextStyle(item) { return normalizedTextStyle(item?.style,assemblyTextDefaults()); }
+  function assemblyTexts() { return Array.isArray(state.assembly.texts)?state.assembly.texts:[]; }
+  function migrateAssemblyTextModel(assembly) {
+    if(!assembly)return;
+    assembly.texts=Array.isArray(assembly.texts)?assembly.texts:[];
+    assembly.textDefaults=assemblyTextDefaults(assembly);
+    if(assembly.schemaVersion!=='1.6.0'){
+      assembly.texts.forEach(item=>{const style=item.style;if(style&&style.fontSize===DEFAULT_FREE_TEXT_STYLE.fontSize&&style.fontFamily===DEFAULT_FREE_TEXT_STYLE.fontFamily&&String(style.color).toLowerCase()===DEFAULT_FREE_TEXT_STYLE.color)delete item.style;});
+      if(!assembly.texts.some(item=>item.role==='title')&&assembly.title?.showInExport!==false){
+        const title=assembly.title||{};
+        assembly.texts.unshift({id:uid('text'),role:'title',text:assembly.name||'新建连接图',x:Number.isFinite(Number(title.x))?Number(title.x):30,y:Number.isFinite(Number(title.y))?Number(title.y):25,...(title.style?{style:normalizedTextStyle(title.style,DEFAULT_TITLE_STYLE)}:{})});
+      }
+      delete assembly.title;assembly.schemaVersion='1.6.0';
+    }
+  }
+  function selectionKey(kind,id) { return kind==='title'?'title':`${kind}:${id}`; }
+  function activateSelectedItem(kind,id,{preserveGroup=false}={}) {
+    const key=selectionKey(kind,id);
+    if(!preserveGroup||!selectedItemKeys.has(key))selectedItemKeys=new Set([key]);
+    selectedNodeId=kind==='node'?id:null;selectedTextId=kind==='free'?id:null;
+    selectedWireId=null;selectedWirePinKey=null;selectedPort=null;
+  }
+  function clearItemSelection() { selectedItemKeys.clear();selectedNodeId=null;selectedTextId=null; }
   function nodeNameOffset(board,node) {
     const configured=node?.nameOffset;
     if(configured&&Number.isFinite(Number(configured.x))&&Number.isFinite(Number(configured.y)))return {x:Number(configured.x),y:Number(configured.y)};
@@ -654,7 +709,7 @@
     const wireDefaults=assemblyWireDefaults();
     return {
       schema:ASSEMBLY_SCHEMA_ID,
-      schemaVersion:'1.4.0',
+      schemaVersion:'1.6.0',
       kind:'wiresketch/assembly',
       version:1,
       id:state.assembly.id,
@@ -662,8 +717,10 @@
       description:state.assembly.description||'',
       layout:{origin:'top-left',axisX:'right',axisY:'down',unit:'diagram-px',routing:'hybrid'},
       canvasSize:assemblyCanvasSize(),
+      textDefaults:assemblyTextDefaults(),
+      texts:assemblyTexts().map(item=>({id:item.id,...(item.role==='title'?{role:'title'}:{}),text:String(item.text||''),x:Number(item.x)||0,y:Number(item.y)||0,...(item.style?{style:freeTextStyle(item)}:{})})),
       wireDefaults:{width:wireDefaults.width,labelGap:wireDefaults.gap,routeGap:wireDefaults.routeGap,cornerRadius:wireDefaults.cornerRadius,showFromLabels:wireDefaults.showFromLabels,showToLabels:wireDefaults.showToLabels},
-      nodes:state.assembly.nodes.map(node=>{const labelGaps=node.interfaceLabelGaps||node.interfaceSignalGaps,modes=node.interfaceConnectionModes;return {id:node.id,boardId:node.boardId,label:node.label,x:node.x,y:node.y,rotation:nodeRotation(node),flipX:nodeFlipX(node),scale:nodeScale(node),fixed:nodeFixed(node),showName:nodeNameVisible(node),...(node.nameOffset?{nameOffset:{x:Number(node.nameOffset.x)||0,y:Number(node.nameOffset.y)||0}}:{}),...(labelGaps?{interfaceLabelGaps:{...labelGaps}}:{}),...(modes&&Object.keys(modes).length?{interfaceConnectionModes:{...modes}}:{})};}),
+      nodes:state.assembly.nodes.map(node=>{const labelGaps=node.interfaceLabelGaps||node.interfaceSignalGaps,modes=node.interfaceConnectionModes;return {id:node.id,boardId:node.boardId,label:node.label,x:node.x,y:node.y,rotation:nodeRotation(node),flipX:nodeFlipX(node),scale:nodeScale(node),fixed:nodeFixed(node),showName:nodeNameVisible(node),...(node.nameStyle?{nameStyle:nodeNameStyle(node)}:{}),...(node.nameOffset?{nameOffset:{x:Number(node.nameOffset.x)||0,y:Number(node.nameOffset.y)||0}}:{}),...(labelGaps?{interfaceLabelGaps:{...labelGaps}}:{}),...(modes&&Object.keys(modes).length?{interfaceConnectionModes:{...modes}}:{})};}),
       connections:state.assembly.connections.map(connection=>({
         id:connection.id,
         mode:connectionMode(connection),
@@ -749,26 +806,32 @@
       }).join('');
       const source=geometry.source,rotation=nodeRotation(node),scaleX=nodeFlipX(node)?-1:1;
       const imageSource=board.source==='generated'?placeholderSvg('',board.generated?.width,board.generated?.height,board.generated?.color):boardImageSource(board);
-      const nameOffset=nodeNameOffset(board,node),nameLabel=nodeNameVisible(node)?`<button type="button" class="node-name-label ${node.id===selectedNodeId?'selected':''}" data-node-name="${node.id}" style="left:${geometry.centerX+nameOffset.x}px;top:${geometry.centerY+nameOffset.y}px" title="拖动板卡名称">${escapeHtml(node.label)}</button>`:'';
+      const nodeSelected=selectedItemKeys.has(selectionKey('node',node.id))||node.id===selectedNodeId;
+      const nameOffset=nodeNameOffset(board,node),nameStyle=nodeNameStyle(node),nameLabel=nodeNameVisible(node)?`<button type="button" class="node-name-label ${nodeSelected?'selected':''}" data-node-name="${node.id}" style="left:${geometry.centerX+nameOffset.x}px;top:${geometry.centerY+nameOffset.y}px;font-size:${nameStyle.fontSize}px;font-family:${escapeHtml(textFontCss(nameStyle))};color:${nameStyle.color}" title="拖动板卡名称">${escapeHtml(node.label)}</button>`:'';
       controls.push(`<div class="node-controls" data-id="${node.id}" style="left:${node.x}px;top:${node.y}px">${ports}${pins}${nameLabel}</div>`);
-      return `<article class="board-node ${node.id===selectedNodeId?'selected':''} ${nodeFixed(node)?'fixed':''}" data-id="${node.id}" style="left:${node.x}px;top:${node.y}px"><div class="node-body">${imageSource?`<img src="${imageSource}" data-board="${board.id}" alt="" style="left:${source.x}px;top:${source.y}px;width:${source.width}px;height:${source.height}px;transform:rotate(${rotation}deg) scaleX(${scaleX});transform-origin:center">`:`<div class="node-placeholder" style="transform:rotate(${rotation}deg) scaleX(${scaleX})"></div>`}</div><footer class="node-header"><span class="node-header-spacer">${nodeFixed(node)?'<span class="node-fixed-mark" title="位置已固定">◆</span>':''}</span><button class="node-action node-scale-down" title="缩小板卡">−</button><span class="node-scale-label">${Math.round(nodeScale(node)*100)}%</span><button class="node-action node-scale-up" title="放大板卡">＋</button><button class="node-action node-flip" title="水平翻转">⇆</button><button class="node-action node-rotate" title="顺时针旋转 90°">↻</button><button class="node-action node-remove" title="移除板卡">×</button></footer></article>`;
+      return `<article class="board-node ${nodeSelected?'selected':''} ${nodeFixed(node)?'fixed':''}" data-id="${node.id}" style="left:${node.x}px;top:${node.y}px"><div class="node-body">${imageSource?`<img src="${imageSource}" data-board="${board.id}" alt="" style="left:${source.x}px;top:${source.y}px;width:${source.width}px;height:${source.height}px;transform:rotate(${rotation}deg) scaleX(${scaleX});transform-origin:center">`:`<div class="node-placeholder" style="transform:rotate(${rotation}deg) scaleX(${scaleX})"></div>`}</div><footer class="node-header"><span class="node-header-spacer">${nodeFixed(node)?'<span class="node-fixed-mark" title="位置已固定">◆</span>':''}</span><button class="node-action node-scale-down" title="缩小板卡">−</button><span class="node-scale-label">${Math.round(nodeScale(node)*100)}%</span><button class="node-action node-scale-up" title="放大板卡">＋</button><button class="node-action node-flip" title="水平翻转">⇆</button><button class="node-action node-rotate" title="顺时针旋转 90°">↻</button><button class="node-action node-remove" title="移除板卡">×</button></footer></article>`;
     }).join('');
-    controlLayer.innerHTML=controls.join('');
+    const textMarkup=assemblyTexts().map(item=>{const style=freeTextStyle(item);return `<button type="button" class="assembly-text-element ${selectedItemKeys.has(selectionKey('free',item.id))||item.id===selectedTextId?'selected':''}" data-text-kind="free" data-text-id="${item.id}" style="left:${Number(item.x)||0}px;top:${Number(item.y)||0}px;font-size:${style.fontSize}px;font-family:${escapeHtml(textFontCss(style))};color:${style.color}">${escapeHtml(item.text||'自由文本')}</button>`;}).join('');
+    controlLayer.innerHTML=controls.join('')+textMarkup;
     $$('.board-node').forEach(nodeEl => {
-      const selectNode=()=>{selectedNodeId=nodeEl.dataset.id;selectedWireId=null;selectedWirePinKey=null;selectedPort=null;renderSelection();};
-      nodeEl.onpointerdown = e => { if(e.button!==0)return;if(!e.target.closest('.node-port,.node-pin'))selectNode();const node=state.assembly.nodes.find(item=>item.id===nodeEl.dataset.id);if (!nodeFixed(node)&&!e.target.closest('.node-port,.node-pin,.node-action')) startNodeDrag(e,nodeEl.dataset.id); };
-      nodeEl.onclick = e => {if(!e.target.closest('.node-port,.node-pin,.node-action'))selectNode();};
+      const selectNode=(preserveGroup=false)=>{activateSelectedItem('node',nodeEl.dataset.id,{preserveGroup});renderSelection();};
+      nodeEl.onpointerdown = e => { if(e.button!==0)return;if(!e.target.closest('.node-port,.node-pin'))selectNode(true);const node=state.assembly.nodes.find(item=>item.id===nodeEl.dataset.id);if (!nodeFixed(node)&&!e.target.closest('.node-port,.node-pin,.node-action')) startNodeDrag(e,nodeEl.dataset.id); };
+      nodeEl.onclick = e => {if(performance.now()<ignoreCanvasClickUntil)return;if(!e.target.closest('.node-port,.node-pin,.node-action'))selectNode(true);};
       $('.node-scale-down', nodeEl).onclick = e => { e.stopPropagation(); resizeNode(nodeEl.dataset.id,-.1); };
       $('.node-scale-up', nodeEl).onclick = e => { e.stopPropagation(); resizeNode(nodeEl.dataset.id,.1); };
       $('.node-flip', nodeEl).onclick = e => { e.stopPropagation(); flipNode(nodeEl.dataset.id); };
       $('.node-rotate', nodeEl).onclick = e => { e.stopPropagation(); rotateNode(nodeEl.dataset.id); };
       $('.node-remove', nodeEl).onclick = e => { e.stopPropagation(); removeNode(nodeEl.dataset.id); };
     });
-    $$('.node-port').forEach(port => port.onclick = e => { e.stopPropagation(); selectPort(port.dataset.node, port.dataset.interface); });
-    $$('.node-pin').forEach(pin=>pin.onclick=e=>{e.stopPropagation();selectedPort={nodeId:pin.dataset.node,interfaceId:pin.dataset.interface};selectedNodeId=null;selectedWireId=null;selectedWirePinKey=null;selectPortPin(Number(pin.dataset.pin));});
+    $$('.node-port').forEach(port => port.onclick = e => { e.stopPropagation();clearItemSelection();selectPort(port.dataset.node, port.dataset.interface); });
+    $$('.node-pin').forEach(pin=>pin.onclick=e=>{e.stopPropagation();selectedPort={nodeId:pin.dataset.node,interfaceId:pin.dataset.interface};clearItemSelection();selectedWireId=null;selectedWirePinKey=null;selectPortPin(Number(pin.dataset.pin));});
     $$('.node-name-label').forEach(label=>{
       label.onpointerdown=e=>{if(e.button!==0)return;e.stopPropagation();startNodeNameDrag(e,label.dataset.nodeName);};
       label.onclick=e=>e.stopPropagation();
+    });
+    $$('.assembly-text-element').forEach(element=>{
+      element.onpointerdown=e=>{if(e.button!==0)return;e.stopPropagation();startTextDrag(e,element.dataset.textKind,element.dataset.textId);};
+      element.onclick=e=>e.stopPropagation();
     });
     $$('.node-body img[data-board]').forEach(img => {
       const captureSize = () => {
@@ -780,7 +843,7 @@
       };
       img.complete ? captureSize() : img.onload=captureSize;
     });
-    $('#assemblyEmpty').classList.toggle('hidden', state.assembly.nodes.length > 0);
+    $('#assemblyEmpty').classList.toggle('hidden', state.assembly.nodes.length > 0||assemblyTexts().length > 0);
     $('#nodeCount').textContent = state.assembly.nodes.length;
     $('#wireCount').textContent = state.assembly.connections.reduce((total,connection)=>{
       const from=endpointDetails(connection.from),to=endpointDetails(connection.to);
@@ -792,8 +855,9 @@
   }
 
   function renderSelection() {
-    $$('.board-node').forEach(n => n.classList.toggle('selected', n.dataset.id === selectedNodeId));
-    $$('.node-name-label').forEach(label=>label.classList.toggle('selected',label.dataset.nodeName===selectedNodeId));
+    $$('.board-node').forEach(n => n.classList.toggle('selected',selectedItemKeys.has(selectionKey('node',n.dataset.id))||n.dataset.id===selectedNodeId));
+    $$('.node-name-label').forEach(label=>label.classList.toggle('selected',selectedItemKeys.has(selectionKey('node',label.dataset.nodeName))||label.dataset.nodeName===selectedNodeId));
+    $$('.assembly-text-element[data-text-kind="free"]').forEach(element=>element.classList.toggle('selected',selectedItemKeys.has(selectionKey('free',element.dataset.textId))||element.dataset.textId===selectedTextId));
     $$('.node-port').forEach(port=>port.classList.toggle('selected',port.dataset.node===selectedPort?.nodeId&&port.dataset.interface===selectedPort?.interfaceId));
     $$('.wire-group.bundle-selectable').forEach(group=>group.classList.toggle('selected',group.dataset.id===selectedWireId&&!selectedWirePinKey));
     $$('.signal-wire.selectable').forEach(w => w.classList.toggle('selected', w.closest('.wire-group')?.dataset.id===selectedWireId&&w.dataset.pinKey===selectedWirePinKey));
@@ -852,21 +916,38 @@
     $('#canvasHeightValue').value=canvasSize.height;
     $('#defaultShowFromLabels').checked=defaults.showFromLabels;
     $('#defaultShowToLabels').checked=defaults.showToLabels;
+    const textDefaults=assemblyTextDefaults();
+    $('#defaultTextFontSize').value=textDefaults.fontSize;$('#defaultTextFontSizeValue').value=textDefaults.fontSize;
+    $('#defaultTextFontFamily').value=textDefaults.fontFamily;$('#defaultTextColor').value=textDefaults.color;
     const node=state.assembly.nodes.find(item=>item.id===selectedNodeId),board=state.boards.find(item=>item.id===node?.boardId);
+    const textItem=assemblyTexts().find(item=>item.id===selectedTextId);
     const portNode=state.assembly.nodes.find(item=>item.id===selectedPort?.nodeId),portBoard=state.boards.find(item=>item.id===portNode?.boardId),portInterface=portBoard?.interfaces.find(item=>item.id===selectedPort?.interfaceId);
-    const selected=selectedSignal(),bundle=selectedBundle(),hasNode=!!node&&!!board,hasPort=!!portNode&&!!portInterface,hasSignal=!!selected,hasBundle=!!bundle;
-    $('#globalPropertyGroup').classList.toggle('hidden',hasNode||hasPort||hasSignal||hasBundle);
-    $('#nodePropertyGroup').classList.toggle('hidden',!hasNode||hasPort||hasSignal||hasBundle);
-    $('#portPropertyGroup').classList.toggle('hidden',!hasPort||hasSignal||hasBundle);
-    $('#wirePropertyGroup').classList.toggle('hidden',!hasSignal);
-    $('#bundlePropertyGroup').classList.toggle('hidden',!hasBundle);
-    $('#assemblyPropertyTitle').textContent=hasSignal?'信号线属性':hasBundle?'线束属性':hasPort?'端口属性':hasNode?'板卡属性':'全局属性';
+    const selected=selectedSignal(),bundle=selectedBundle(),hasNode=!!node&&!!board,hasPort=!!portNode&&!!portInterface,hasSignal=!!selected,hasBundle=!!bundle,hasText=!!textItem,hasMulti=selectedItemKeys.size>1;
+    $('#globalPropertyGroup').classList.toggle('hidden',hasMulti||hasNode||hasPort||hasSignal||hasBundle||hasText);
+    $('#multiPropertyGroup').classList.toggle('hidden',!hasMulti);$('#multiSelectionCount').textContent=selectedItemKeys.size;
+    $('#nodePropertyGroup').classList.toggle('hidden',hasMulti||!hasNode||hasPort||hasSignal||hasBundle||hasText);
+    $('#textPropertyGroup').classList.toggle('hidden',hasMulti||!hasText);
+    $('#portPropertyGroup').classList.toggle('hidden',hasMulti||!hasPort||hasSignal||hasBundle||hasText);
+    $('#wirePropertyGroup').classList.toggle('hidden',hasMulti||!hasSignal);
+    $('#bundlePropertyGroup').classList.toggle('hidden',hasMulti||!hasBundle);
+    $('#assemblyPropertyTitle').textContent=hasMulti?'批量选择':hasText?'文本属性':hasSignal?'信号线属性':hasBundle?'线束属性':hasPort?'端口属性':hasNode?'板卡属性':'全局属性';
     if(node&&board){
+      const style=nodeNameStyle(node);
       $('#nodePropertySummary').textContent=node.label;
       $('#nodeFixed').checked=nodeFixed(node);
       $('#nodeShowName').checked=nodeNameVisible(node);
+      $('#nodeNameFontSize').value=style.fontSize;$('#nodeNameFontSizeValue').value=style.fontSize;
+      $('#nodeNameFontFamily').value=style.fontFamily;$('#nodeNameColor').value=style.color;
+      $('#resetNodeNameStyleBtn').disabled=!node.nameStyle;
       $('#resetNodeNamePositionBtn').disabled=!node.nameOffset;
       $('#nodeInterfaceGaps').innerHTML=board.interfaces.map(intf=>{const override=node.interfaceLabelGaps?.[intf.id]??node.interfaceSignalGaps?.[intf.id],value=override??defaults.gap;return `<div class="interface-gap-row"><span title="${escapeHtml(intf.name)}">${escapeHtml(intf.name)} · ${intf.pins.length}P</span><input type="range" min="0" max="24" step="1" value="${value}" data-interface="${intf.id}" aria-label="${escapeHtml(intf.name)} 信号标签间距"><output>${value}</output><button type="button" class="interface-gap-reset" data-reset-interface="${intf.id}" title="恢复全局 ${defaults.gap}" ${override==null?'disabled':''}>↺</button></div>`;}).join('')||'<div class="compact-empty">此板卡没有接口</div>';
+    }
+    if(textItem){
+      const style=freeTextStyle(textItem);
+      $('#assemblyTextContent').value=textItem.text||'';
+      $('#assemblyTextFontSize').value=style.fontSize;$('#assemblyTextFontSizeValue').value=style.fontSize;
+      $('#assemblyTextFontFamily').value=style.fontFamily;$('#assemblyTextColor').value=style.color;
+      $('#resetAssemblyTextStyleBtn').disabled=!textItem.style;
     }
     if(hasPort){
       const single=interfaceSingleSignalMode(portNode,portInterface.id);
@@ -1196,20 +1277,18 @@
       }).join('');
       return `<g class="wire-group ${singleSelectable?'':'bundle-selectable'} ${bundleSelected?'selected':''}" data-id="${c.id}">${lines}</g>`;
     }).join('');
-    $$('.signal-wire.selectable').forEach(w => w.onclick = e => { e.stopPropagation(); selectedWireId=w.closest('.wire-group').dataset.id;selectedWirePinKey=w.dataset.pinKey;selectedNodeId=null;selectedPort=null;renderSelection(); });
-    $$('.wire-group.bundle-selectable').forEach(group=>group.onclick=e=>{e.stopPropagation();selectedWireId=group.dataset.id;selectedWirePinKey=null;selectedNodeId=null;selectedPort=null;renderSelection();});
+    $$('.signal-wire.selectable').forEach(w => w.onclick = e => { e.stopPropagation();clearItemSelection();selectedWireId=w.closest('.wire-group').dataset.id;selectedWirePinKey=w.dataset.pinKey;selectedPort=null;renderSelection(); });
+    $$('.wire-group.bundle-selectable').forEach(group=>group.onclick=e=>{e.stopPropagation();clearItemSelection();selectedWireId=group.dataset.id;selectedWirePinKey=null;selectedPort=null;renderSelection();});
   }
 
   function startNodeDrag(e, nodeId) {
-    const node = state.assembly.nodes.find(n => n.id===nodeId), canvas=$('#assemblyCanvas').getBoundingClientRect();
-    dragState={node, ox:e.clientX-canvas.left-node.x*zoom, oy:e.clientY-canvas.top-node.y*zoom, pointerId:e.pointerId};
-    $('#assemblyCanvas').setPointerCapture(e.pointerId); e.preventDefault();
+    startGroupDrag(e,selectionKey('node',nodeId));
   }
 
   function startNodeNameDrag(e,nodeId) {
     const node=state.assembly.nodes.find(item=>item.id===nodeId),board=state.boards.find(item=>item.id===node?.boardId);if(!node||!board)return;
     const offset=nodeNameOffset(board,node);
-    selectedNodeId=node.id;selectedWireId=null;selectedWirePinKey=null;selectedPort=null;
+    activateSelectedItem('node',node.id,{preserveGroup:true});
     nameDragState={node,board,startClientX:e.clientX,startClientY:e.clientY,startX:offset.x,startY:offset.y,pointerId:e.pointerId};
     $('#assemblyCanvas').setPointerCapture(e.pointerId);renderSelection();e.preventDefault();
   }
@@ -1228,16 +1307,90 @@
     nameDragState=null;ignoreCanvasClickUntil=performance.now()+150;saveState();renderAssemblyProperties();return true;
   }
 
-  function moveNode(e) {
-    if (!dragState) return;
-    const r=$('#assemblyCanvas').getBoundingClientRect();
-    dragState.node.x=Math.max(0,(e.clientX-r.left-dragState.ox)/zoom); dragState.node.y=Math.max(0,(e.clientY-r.top-dragState.oy)/zoom);
-    const el=$(`.board-node[data-id="${dragState.node.id}"]`),controls=$(`.node-controls[data-id="${dragState.node.id}"]`);
-    if(el){el.style.left=`${dragState.node.x}px`;el.style.top=`${dragState.node.y}px`;}
-    if(controls){controls.style.left=`${dragState.node.x}px`;controls.style.top=`${dragState.node.y}px`;}
-    renderWires();
+  function startTextDrag(e,kind,id) {
+    activateSelectedItem(kind,id,{preserveGroup:true});renderSelection();startGroupDrag(e,selectionKey(kind,id));
   }
-  function endNodeDrag() { if(dragState){dragState=null;ignoreCanvasClickUntil=performance.now()+150;saveState();} }
+
+  function selectedMoveTargets(primaryKey) {
+    const keys=selectedItemKeys.has(primaryKey)?[...selectedItemKeys]:[primaryKey],targets=[];
+    keys.forEach(key=>{
+      const separator=key.indexOf(':'),kind=key.slice(0,separator),id=key.slice(separator+1);
+      const item=kind==='node'?state.assembly.nodes.find(node=>node.id===id):assemblyTexts().find(text=>text.id===id);
+      if(!item||kind==='node'&&nodeFixed(item))return;
+      targets.push({kind,id,item,startX:Number(item.x)||0,startY:Number(item.y)||0});
+    });
+    return targets;
+  }
+
+  function startGroupDrag(e,primaryKey) {
+    const targets=selectedMoveTargets(primaryKey);if(!targets.length)return;
+    dragState={targets,startClientX:e.clientX,startClientY:e.clientY,minX:Math.min(...targets.map(target=>target.startX)),minY:Math.min(...targets.map(target=>target.startY))};
+    $('#assemblyCanvas').setPointerCapture(e.pointerId);e.preventDefault();
+  }
+
+  function addAssemblyText() {
+    const viewport=$('#assemblyViewport'),canvasSize=assemblyCanvasSize();
+    const x=Math.max(12,Math.min(canvasSize.width-120,(viewport.scrollLeft+viewport.clientWidth/2)/zoom-55));
+    const y=Math.max(12,Math.min(canvasSize.height-40,(viewport.scrollTop+viewport.clientHeight/2)/zoom-12));
+    const item={id:uid('text'),text:'自由文本',x,y};
+    state.assembly.texts=assemblyTexts();state.assembly.texts.push(item);
+    activateSelectedItem('free',item.id);selectedPort=null;
+    saveState();renderAssembly();
+  }
+
+  function deleteSelectedText() {
+    if(!selectedTextId)return;
+    state.assembly.texts=assemblyTexts().filter(item=>item.id!==selectedTextId);selectedItemKeys.delete(selectionKey('free',selectedTextId));selectedTextId=null;saveState();renderAssembly();
+  }
+
+  function startMarquee(e) {
+    if(e.button!==0)return;
+    const canvas=$('#assemblyCanvas'),rect=canvas.getBoundingClientRect(),x=e.clientX-rect.left,y=e.clientY-rect.top;
+    marqueeState={startClientX:e.clientX,startClientY:e.clientY,currentClientX:e.clientX,currentClientY:e.clientY,startX:x,startY:y,additive:e.shiftKey};
+    const marquee=$('#selectionMarquee');marquee.classList.remove('hidden');marquee.style.left=`${x}px`;marquee.style.top=`${y}px`;marquee.style.width='0';marquee.style.height='0';
+    canvas.setPointerCapture(e.pointerId);e.preventDefault();
+  }
+
+  function moveMarquee(e) {
+    if(!marqueeState)return false;
+    const canvasRect=$('#assemblyCanvas').getBoundingClientRect(),x=e.clientX-canvasRect.left,y=e.clientY-canvasRect.top,left=Math.min(marqueeState.startX,x),top=Math.min(marqueeState.startY,y);
+    marqueeState.currentClientX=e.clientX;marqueeState.currentClientY=e.clientY;
+    const marquee=$('#selectionMarquee');marquee.style.left=`${left}px`;marquee.style.top=`${top}px`;marquee.style.width=`${Math.abs(x-marqueeState.startX)}px`;marquee.style.height=`${Math.abs(y-marqueeState.startY)}px`;
+    return true;
+  }
+
+  function endMarquee() {
+    if(!marqueeState)return false;
+    const stateSnapshot=marqueeState;marqueeState=null;$('#selectionMarquee').classList.add('hidden');
+    const left=Math.min(stateSnapshot.startClientX,stateSnapshot.currentClientX),right=Math.max(stateSnapshot.startClientX,stateSnapshot.currentClientX),top=Math.min(stateSnapshot.startClientY,stateSnapshot.currentClientY),bottom=Math.max(stateSnapshot.startClientY,stateSnapshot.currentClientY);
+    const keys=stateSnapshot.additive?new Set(selectedItemKeys):new Set(),intersects=element=>{const rect=element.getBoundingClientRect();return rect.right>=left&&rect.left<=right&&rect.bottom>=top&&rect.top<=bottom;};
+    if(right-left>=4||bottom-top>=4){
+      $$('.board-node').forEach(element=>{if(intersects(element))keys.add(selectionKey('node',element.dataset.id));});
+      $$('.assembly-text-element[data-text-kind="free"]').forEach(element=>{if(intersects(element))keys.add(selectionKey('free',element.dataset.textId));});
+    }
+    selectedItemKeys=keys;selectedNodeId=null;selectedTextId=null;selectedWireId=null;selectedWirePinKey=null;selectedPort=null;pendingPort=null;
+    const first=[...keys][0];if(first?.startsWith('node:'))selectedNodeId=first.slice(5);else if(first?.startsWith('free:'))selectedTextId=first.slice(5);
+    ignoreCanvasClickUntil=performance.now()+150;renderSelection();return true;
+  }
+
+  function moveNode(e) {
+    if (!dragState) return false;
+    const dx=Math.max(-dragState.minX,(e.clientX-dragState.startClientX)/zoom),dy=Math.max(-dragState.minY,(e.clientY-dragState.startClientY)/zoom);
+    dragState.targets.forEach(target=>{
+      target.item.x=target.startX+dx;target.item.y=target.startY+dy;
+      if(target.kind==='node'){
+        const el=$(`.board-node[data-id="${target.id}"]`),controls=$(`.node-controls[data-id="${target.id}"]`);
+        if(el){el.style.left=`${target.item.x}px`;el.style.top=`${target.item.y}px`;}
+        if(controls){controls.style.left=`${target.item.x}px`;controls.style.top=`${target.item.y}px`;}
+      }else{
+        const element=$(`.assembly-text-element[data-text-id="${target.id}"]`);
+        if(element){element.style.left=`${target.item.x}px`;element.style.top=`${target.item.y}px`;}
+      }
+    });
+    renderWires();
+    return true;
+  }
+  function endNodeDrag() { if(!dragState)return false;dragState=null;ignoreCanvasClickUntil=performance.now()+150;saveState();renderAssemblyProperties();return true; }
 
   function sameEndpoint(first,second) { return first?.nodeId===second?.nodeId&&first?.interfaceId===second?.interfaceId; }
 
@@ -1308,7 +1461,7 @@
   }
 
   function removeNode(id) {
-    state.assembly.nodes=state.assembly.nodes.filter(n=>n.id!==id); state.assembly.connections=state.assembly.connections.filter(c=>c.from.nodeId!==id&&c.to.nodeId!==id); selectedNodeId=null;selectedPort=null;pendingPort=null; saveState(); renderAssembly();
+    state.assembly.nodes=state.assembly.nodes.filter(n=>n.id!==id); state.assembly.connections=state.assembly.connections.filter(c=>c.from.nodeId!==id&&c.to.nodeId!==id);selectedItemKeys.delete(selectionKey('node',id));selectedNodeId=null;selectedPort=null;pendingPort=null; saveState(); renderAssembly();
   }
 
   function rotateNode(id) {
@@ -1394,6 +1547,17 @@
     return `<g transform="translate(${bounds.x} ${bounds.y}) scale(${sx} ${sy})" filter="url(#shadow)"><rect width="420" height="260" rx="16" fill="${color}" stroke="#cda84b" stroke-width="7"/><g opacity=".22" stroke="#fff" stroke-width="2">${traces}</g><rect x="145" y="82" width="130" height="96" rx="6" fill="#25312d"/>${name}</g>`;
   }
 
+  function textVisualBounds(text,x,y,style,anchor='start') {
+    const lines=String(text||'').split('\n'),longest=Math.max(1,...lines.map(line=>[...line].length)),width=Math.max(style.fontSize,longest*style.fontSize*.62),height=Math.max(style.fontSize,lines.length*style.fontSize*1.25);
+    return {left:anchor==='middle'?x-width/2:x,top:y,right:anchor==='middle'?x+width/2:x+width,bottom:y+height};
+  }
+
+  function positionedTextSvg(text,x,y,style,{anchor='start',weight=500,outline=false}={}) {
+    const lines=String(text||'').split('\n'),family=escapeXml(textFontCss(style)),stroke=outline?' stroke="#fff" stroke-width="4" stroke-linejoin="round" paint-order="stroke"':'';
+    const tspans=lines.map((line,index)=>`<tspan x="${x}" dy="${index?style.fontSize*1.25:0}">${escapeXml(line||' ')}</tspan>`).join('');
+    return `<text x="${x}" y="${y}" text-anchor="${anchor}" dominant-baseline="hanging" font-family="${family}" font-size="${style.fontSize}" font-weight="${weight}" fill="${style.color}"${stroke}>${tspans}</text>`;
+  }
+
   function buildAssemblySvg() {
     const nodes = state.assembly.nodes;
     const exportWireData=state.assembly.connections.flatMap(connection=>{
@@ -1411,9 +1575,9 @@
     nodes.forEach(node=>{
       const board=state.boards.find(b=>b.id===node.boardId);if(!board||!nodeNameVisible(node))return;
       const geometry=getBoardImageGeometry(board,node),offset=nodeNameOffset(board,node),x=node.x+geometry.centerX+offset.x,y=node.y+geometry.centerY+offset.y;
-      const labelWidth=Math.max(40,Math.min(220,String(node.label).length*7+16));
-      visualBounds.push({left:x-labelWidth/2,top:y-11,right:x+labelWidth/2,bottom:y+11});
+      visualBounds.push(textVisualBounds(node.label,x,y-nodeNameStyle(node).fontSize/2,nodeNameStyle(node),'middle'));
     });
+    assemblyTexts().forEach(item=>visualBounds.push(textVisualBounds(item.text,item.x,item.y,freeTextStyle(item))));
     exportWireData.forEach(wire=>{
       const values=(wire.d.match(/-?\d+(?:\.\d+)?/g)||[]).map(Number),xs=[],ys=[];
       values.forEach((value,index)=>(index%2?ys:xs).push(value));
@@ -1423,10 +1587,10 @@
     const minY = Math.min(...visualBounds.map(b=>b.top))-34;
     const maxX = Math.max(...visualBounds.map(b=>b.right))+34;
     const maxY = Math.max(...visualBounds.map(b=>b.bottom))+34;
-    const padding=38, headerHeight=58;
+    const padding=38;
     const width=Math.max(420,Math.ceil(maxX-minX+padding*2));
-    const height=Math.max(280,Math.ceil(maxY-minY+padding*2+headerHeight));
-    const tx=padding-minX, ty=padding+headerHeight-minY;
+    const height=Math.max(280,Math.ceil(maxY-minY+padding*2));
+    const tx=padding-minX, ty=padding-minY;
 
     const wires = exportWireData.map(({pair,a,b,d,style})=>`<g><path d="${d}" fill="none" stroke="#fff" stroke-width="${style.width+2.8}" stroke-linecap="round" stroke-linejoin="round"/><path d="${d}" fill="none" stroke="${pair.color}" stroke-width="${style.width}" stroke-linecap="square" stroke-linejoin="miter"/>${style.showFromLabels?pinTagMarkup(a,pair.fromName,pair.color):''}${style.showToLabels?pinTagMarkup(b,pair.toName,pair.color):''}${wireMiddleLabelMarkup(pair.label,d)}</g>`).join('');
 
@@ -1441,16 +1605,18 @@
     const nodeNameMarkup=nodes.map(node=>{
       const board=state.boards.find(b=>b.id===node.boardId);if(!board||!nodeNameVisible(node))return '';
       const geometry=getBoardImageGeometry(board,node),offset=nodeNameOffset(board,node),x=node.x+geometry.centerX+offset.x,y=node.y+geometry.centerY+offset.y;
-      return `<text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="middle" font-family="ui-sans-serif,system-ui,sans-serif" font-size="11" font-weight="800" fill="#25334a" stroke="#fff" stroke-width="4" stroke-linejoin="round" paint-order="stroke">${escapeXml(node.label)}</text>`;
+      const style=nodeNameStyle(node);return positionedTextSvg(node.label,x,y-style.fontSize/2,style,{anchor:'middle',weight:800,outline:true});
     }).join('');
+    const freeTextMarkup=assemblyTexts().map(item=>positionedTextSvg(item.text,item.x,item.y,freeTextStyle(item))).join('');
 
-    return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><defs><filter id="shadow" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="5" stdDeviation="5" flood-color="#263951" flood-opacity=".16"/></filter></defs><rect width="100%" height="100%" fill="#fff"/><text x="${padding}" y="38" font-size="20" font-weight="800" fill="#111">${escapeXml(state.assembly.name)}</text><g transform="translate(${tx} ${ty})"><g>${nodeMarkup}</g><g>${wires}</g><g>${nodeNameMarkup}</g></g></svg>`;
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><defs><filter id="shadow" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="5" stdDeviation="5" flood-color="#263951" flood-opacity=".16"/></filter></defs><rect width="100%" height="100%" fill="#fff"/><g transform="translate(${tx} ${ty})"><g>${nodeMarkup}</g><g>${wires}</g><g>${nodeNameMarkup}${freeTextMarkup}</g></g></svg>`;
   }
 
   function renderAssemblyDocumentSvg(documentData) {
     if(documentData?.kind!=='wiresketch/assembly'||!Array.isArray(documentData.nodes))throw new Error('Invalid WireSketch assembly');
     const previousState=state;
     state={boards:(documentData.embeddedBoards||[]).map(board=>({...board,builtIn:false})),assembly:{...documentData,embeddedBoards:undefined}};
+    migrateAssemblyTextModel(state.assembly);
     state.boards.forEach(board=>{if(board.source==='generated')refreshGeneratedBoard(board);});
     try{return buildAssemblySvg();}finally{state=previousState;}
   }
@@ -1509,7 +1675,7 @@
   function loadAssemblyDocument(doc) {
     if(doc?.kind!=='wiresketch/assembly'||!Array.isArray(doc.nodes))return false;
     (doc.embeddedBoards||[]).forEach(board=>{if(!state.boards.some(b=>b.id===board.id)){board.builtIn=false;if(board.source==='generated')refreshGeneratedBoard(board);state.boards.push(board);}});
-    state.assembly={...doc,embeddedBoards:undefined}; selectedNodeId=null;selectedWireId=null;selectedWirePinKey=null;selectedPort=null;pendingPort=null;saveState();renderComponentList();renderAssembly();toast('装配体已打开');
+    state.assembly={...doc,embeddedBoards:undefined};migrateAssemblyTextModel(state.assembly);selectedItemKeys.clear();selectedNodeId=null;selectedWireId=null;selectedWirePinKey=null;selectedPort=null;selectedTextId=null;pendingPort=null;saveState();renderComponentList();renderAssembly();toast('装配体已打开');
     return true;
   }
 
@@ -1567,7 +1733,8 @@
     const syncExportControls=()=>{const svg=$('#exportFormat').value==='svg';$('#exportScale').disabled=svg;$('#renderAssemblyBtn').textContent=svg?'导出 SVG':'导出 PNG';};
     $('#exportFormat').onchange=syncExportControls;syncExportControls();
     $('#autoLayoutBtn').onclick=autoLayout;$('#renderAssemblyBtn').onclick=()=>$('#exportFormat').value==='svg'?exportAssemblySvg():renderAssemblyImage();$('#exportAssemblyBtn').onclick=exportAssembly;
-    $('#clearAssemblyBtn').onclick=()=>{if(!state.assembly.nodes.length||confirm('确定清空当前装配画布吗？')){state.assembly.nodes=[];state.assembly.connections=[];selectedNodeId=null;selectedWireId=null;selectedWirePinKey=null;selectedPort=null;pendingPort=null;saveState();renderAssembly();}};
+    $('#addAssemblyTextBtn').onclick=addAssemblyText;
+    $('#clearAssemblyBtn').onclick=()=>{if(!state.assembly.nodes.length&&!assemblyTexts().length||confirm('确定清空当前装配画布吗？')){state.assembly.nodes=[];state.assembly.connections=[];state.assembly.texts=[];selectedItemKeys.clear();selectedNodeId=null;selectedWireId=null;selectedWirePinKey=null;selectedPort=null;selectedTextId=null;pendingPort=null;saveState();renderAssembly();}};
     $('#importAssemblyBtn').onclick=()=>$('#importAssemblyInput').click();$('#importAssemblyInput').onchange=e=>{if(e.target.files[0])importAssembly(e.target.files[0]);e.target.value='';};
     $('#defaultWireWidth').oninput=e=>{const value=Math.max(1,Math.min(8,+e.target.value||DEFAULT_WIRE_STYLE.width));updateAssemblyWireDefaults({width:value});$('#defaultWireWidthValue').value=value.toFixed(1);saveState();renderWires();};
     $('#defaultWireGap').oninput=e=>{const value=Math.max(0,Math.min(24,Number(e.target.value)||0));updateAssemblyWireDefaults({labelGap:value});$('#defaultWireGapValue').value=value;saveState();renderWires();};
@@ -1577,12 +1744,28 @@
     $('#canvasHeight').oninput=e=>{const size=assemblyCanvasSize();state.assembly.canvasSize={...size,height:+e.target.value};$('#canvasHeightValue').value=e.target.value;saveState();renderAssembly();};
     $('#defaultShowFromLabels').onchange=e=>{updateAssemblyWireDefaults({showFromLabels:e.target.checked});saveState();renderAssemblyProperties();renderWires();};
     $('#defaultShowToLabels').onchange=e=>{updateAssemblyWireDefaults({showToLabels:e.target.checked});saveState();renderAssemblyProperties();renderWires();};
+    const updateTextDefaults=(property,value)=>{state.assembly.textDefaults={...assemblyTextDefaults(),[property]:value};saveState();renderAssembly();};
+    $('#defaultTextFontSize').oninput=e=>updateTextDefaults('fontSize',Number(e.target.value));
+    $('#defaultTextFontFamily').onchange=e=>updateTextDefaults('fontFamily',e.target.value);
+    $('#defaultTextColor').oninput=e=>updateTextDefaults('color',e.target.value);
     $('#nodeInterfaceGaps').oninput=e=>{const input=e.target.closest('input[data-interface]'),node=state.assembly.nodes.find(item=>item.id===selectedNodeId);if(!input||!node)return;node.interfaceLabelGaps=node.interfaceLabelGaps||{};node.interfaceLabelGaps[input.dataset.interface]=Math.max(0,Math.min(24,Number(input.value)||0));delete node.interfaceSignalGaps;const output=input.nextElementSibling;if(output)output.value=input.value;const reset=input.parentElement.querySelector('.interface-gap-reset');if(reset)reset.disabled=false;saveState();renderWires();};
     $('#nodeInterfaceGaps').onclick=e=>{const button=e.target.closest('[data-reset-interface]'),node=state.assembly.nodes.find(item=>item.id===selectedNodeId);if(!button||!node)return;delete node.interfaceLabelGaps?.[button.dataset.resetInterface];delete node.interfaceSignalGaps?.[button.dataset.resetInterface];if(node.interfaceLabelGaps&&!Object.keys(node.interfaceLabelGaps).length)delete node.interfaceLabelGaps;if(node.interfaceSignalGaps&&!Object.keys(node.interfaceSignalGaps).length)delete node.interfaceSignalGaps;saveState();renderAssemblyProperties();renderWires();};
     $('#resetNodeGapsBtn').onclick=()=>{const node=state.assembly.nodes.find(item=>item.id===selectedNodeId);if(!node)return;delete node.interfaceLabelGaps;delete node.interfaceSignalGaps;saveState();renderAssemblyProperties();renderWires();};
     $('#nodeFixed').onchange=e=>{const node=state.assembly.nodes.find(item=>item.id===selectedNodeId);if(!node)return;node.fixed=e.target.checked;saveState();renderAssembly();toast(node.fixed?'板卡位置已固定':'板卡位置已解除固定');};
     $('#nodeShowName').onchange=e=>{const node=state.assembly.nodes.find(item=>item.id===selectedNodeId);if(!node)return;node.showName=e.target.checked;saveState();renderAssembly();};
+    const updateNodeNameStyle=(property,value)=>{const node=state.assembly.nodes.find(item=>item.id===selectedNodeId);if(!node)return;node.nameStyle={...nodeNameStyle(node),[property]:value};saveState();renderAssembly();};
+    $('#nodeNameFontSize').oninput=e=>updateNodeNameStyle('fontSize',Number(e.target.value));
+    $('#nodeNameFontFamily').onchange=e=>updateNodeNameStyle('fontFamily',e.target.value);
+    $('#nodeNameColor').oninput=e=>updateNodeNameStyle('color',e.target.value);
+    $('#resetNodeNameStyleBtn').onclick=()=>{const node=state.assembly.nodes.find(item=>item.id===selectedNodeId);if(!node)return;delete node.nameStyle;saveState();renderAssembly();};
     $('#resetNodeNamePositionBtn').onclick=()=>{const node=state.assembly.nodes.find(item=>item.id===selectedNodeId);if(!node)return;delete node.nameOffset;saveState();renderAssembly();};
+    const updateFreeText=(property,value)=>{const item=assemblyTexts().find(entry=>entry.id===selectedTextId);if(!item)return;if(property==='text')item.text=value;else item.style={...freeTextStyle(item),[property]:value};saveState();renderAssembly();};
+    $('#assemblyTextContent').oninput=e=>updateFreeText('text',e.target.value);
+    $('#assemblyTextFontSize').oninput=e=>updateFreeText('fontSize',Number(e.target.value));
+    $('#assemblyTextFontFamily').onchange=e=>updateFreeText('fontFamily',e.target.value);
+    $('#assemblyTextColor').oninput=e=>updateFreeText('color',e.target.value);
+    $('#resetAssemblyTextStyleBtn').onclick=()=>{const item=assemblyTexts().find(entry=>entry.id===selectedTextId);if(!item)return;delete item.style;saveState();renderAssembly();};
+    $('#deleteAssemblyTextBtn').onclick=deleteSelectedText;
     $('#portSingleSignalMode').onchange=e=>{const node=state.assembly.nodes.find(item=>item.id===selectedPort?.nodeId);if(!node||!selectedPort)return;const conflicting=state.assembly.connections.some(connection=>connectionMode(connection)===(e.target.checked?'bundle':'signal')&&(sameEndpoint(connection.from,selectedPort)||sameEndpoint(connection.to,selectedPort)));if(conflicting){e.target.checked=!e.target.checked;toast(e.target.checked?'请先删除该端口的单信号线连接':'请先删除该端口的整束连接');return;}node.interfaceConnectionModes=node.interfaceConnectionModes||{};if(e.target.checked)node.interfaceConnectionModes[selectedPort.interfaceId]='signal';else delete node.interfaceConnectionModes[selectedPort.interfaceId];if(!Object.keys(node.interfaceConnectionModes).length)delete node.interfaceConnectionModes;if(sameEndpoint(pendingPort,selectedPort))pendingPort=null;saveState();renderAssembly();toast(e.target.checked?'已开启单信号线连接模式':'已恢复整束连接模式');};
     $('#wireDisplayName').oninput=e=>{const signal=editableSelectedSignal();if(!signal)return;signal.label=e.target.value;saveState();renderWires();};
     $('#wireWidth').oninput=e=>{const signal=editableSelectedSignal();if(!signal)return;signal.style=signal.style||{};signal.style.width=Math.max(1,Math.min(8,+e.target.value||assemblyWireDefaults().width));$('#wireWidthValue').value=signal.style.width.toFixed(1);saveState();renderWires();};
@@ -1600,8 +1783,9 @@
     $('#deleteWireBtn').onclick=deleteSelectedWire;
     $('#deleteBundleBtn').onclick=deleteSelectedWire;
     const canvas=$('#assemblyCanvas');canvas.ondragover=e=>e.preventDefault();canvas.ondrop=e=>{e.preventDefault();const id=e.dataTransfer.getData('text/pcb-id'),r=canvas.getBoundingClientRect();if(id)addNode(id,{x:(e.clientX-r.left)/zoom-NODE.width/2,y:(e.clientY-r.top)/zoom-NODE.height/2});};
-    canvas.onpointermove=e=>{if(!moveNodeName(e))moveNode(e);};canvas.onpointerup=()=>{if(!endNodeNameDrag())endNodeDrag();};canvas.onpointercancel=()=>{if(!endNodeNameDrag())endNodeDrag();};
-    canvas.onclick=e=>{if(performance.now()<ignoreCanvasClickUntil)return;if(e.target===canvas||e.target.id==='nodeLayer'||e.target.id==='nodeControlLayer'){selectedNodeId=null;selectedWireId=null;selectedWirePinKey=null;selectedPort=null;pendingPort=null;renderAssembly();}};
+    canvas.onpointerdown=e=>{if(e.target===canvas||e.target.id==='nodeLayer'||e.target.id==='nodeControlLayer')startMarquee(e);};
+    canvas.onpointermove=e=>{if(!moveMarquee(e)&&!moveNodeName(e))moveNode(e);};canvas.onpointerup=()=>{if(!endMarquee()&&!endNodeNameDrag())endNodeDrag();};canvas.onpointercancel=()=>{if(!endMarquee()&&!endNodeNameDrag())endNodeDrag();};
+    canvas.onclick=e=>{if(performance.now()<ignoreCanvasClickUntil)return;if(e.target===canvas||e.target.id==='nodeLayer'||e.target.id==='nodeControlLayer'){clearItemSelection();selectedWireId=null;selectedWirePinKey=null;selectedPort=null;pendingPort=null;renderAssembly();}};
     $('#assemblyViewport').addEventListener('wheel',e=>{e.preventDefault();setAssemblyZoom(zoom*(e.deltaY<0?1.1:.9),e.clientX,e.clientY);},{passive:false});
     $('#zoomInBtn').onclick=()=>setAssemblyZoom(zoom+.1);$('#zoomOutBtn').onclick=()=>setAssemblyZoom(zoom-.1);
     document.onkeydown=e=>{
@@ -1610,7 +1794,8 @@
       if((e.key==='r'||e.key==='R')&&selectedNodeId){e.preventDefault();rotateNode(selectedNodeId);return;}
       if((e.key==='f'||e.key==='F')&&selectedNodeId){e.preventDefault();flipNode(selectedNodeId);return;}
       if(e.key==='Delete'||e.key==='Backspace'){
-        if(selectedWireId)deleteSelectedWire();
+        if(selectedTextId)deleteSelectedText();
+        else if(selectedWireId)deleteSelectedWire();
         else if(selectedNodeId)removeNode(selectedNodeId);
       }
     };

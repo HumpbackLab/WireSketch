@@ -8,7 +8,7 @@
   "required": ["schema", "schemaVersion", "kind", "version", "id", "name", "layout", "nodes", "connections", "embeddedBoards"],
   "properties": {
     "schema": { "const": "urn:wiresketch:schema:assembly:1.0", "description": "Stable format identifier. Never translate or modify it." },
-    "schemaVersion": { "enum": ["1.1.0", "1.2.0", "1.3.0", "1.4.0"], "description": "1.4.0 adds independently visible and draggable board-instance names." },
+    "schemaVersion": { "enum": ["1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0", "1.6.0"], "description": "1.6.0 treats the diagram title as free text and adds inherited defaults for all editable text." },
     "kind": { "const": "wiresketch/assembly" },
     "version": { "const": 1 },
     "id": { "$ref": "#/$defs/id" },
@@ -16,6 +16,9 @@
     "description": { "type": "string", "default": "" },
     "layout": { "$ref": "#/$defs/layout" },
     "canvasSize": { "$ref": "#/$defs/canvasSize" },
+    "title": { "$ref": "#/$defs/title", "deprecated": true, "description": "Legacy 1.5 title configuration; 1.6 importers migrate it into texts[]." },
+    "textDefaults": { "$ref": "#/$defs/textStyle" },
+    "texts": { "type": "array", "items": { "$ref": "#/$defs/freeText" }, "default": [] },
     "wireDefaults": { "$ref": "#/$defs/wireDefaults" },
     "nodes": {
       "type": "array",
@@ -72,6 +75,7 @@
         "fixed": { "type": "boolean", "default": false, "description": "Prevents this board instance from being dragged or moved by automatic layout." },
         "showName": { "type": "boolean", "default": true, "description": "Controls whether this board instance label is shown on the assembly canvas and in image exports." },
         "nameOffset": { "$ref": "#/$defs/nameOffset" },
+        "nameStyle": { "$ref": "#/$defs/textStyle" },
         "interfaceLabelGaps": {
           "type": "object",
           "description": "Optional spacing added between adjacent signal-name labels, keyed by interface ID for this board instance; wire paths are unaffected.",
@@ -92,6 +96,40 @@
       "properties": {
         "x": { "type": "number", "minimum": -3000, "maximum": 3000 },
         "y": { "type": "number", "minimum": -3000, "maximum": 3000 }
+      }
+    },
+    "textStyle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fontSize", "fontFamily", "color"],
+      "properties": {
+        "fontSize": { "type": "number", "minimum": 8, "maximum": 72 },
+        "fontFamily": { "enum": ["sans-serif", "serif", "monospace", "Arial", "Helvetica", "Verdana", "Tahoma", "Georgia", "TimesNewRoman", "CourierNew", "MicrosoftYaHei", "PingFangSC", "NotoSansSC", "SimHei", "SimSun", "KaiTi", "FangSong"] },
+        "color": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$" }
+      }
+    },
+    "title": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y", "showInExport", "style"],
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "showInExport": { "type": "boolean", "default": true },
+        "style": { "$ref": "#/$defs/textStyle" }
+      }
+    },
+    "freeText": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "text", "x", "y"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "role": { "enum": ["title"], "description": "Optional migration hint; title text otherwise behaves exactly like free text." },
+        "text": { "type": "string", "maxLength": 500 },
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "style": { "$ref": "#/$defs/textStyle" }
       }
     },
     "endpoint": {

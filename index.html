@@ -145,6 +145,7 @@
               <input id="assemblyName" class="title-input" value="新建连接图" aria-label="装配体名称" />
             </div>
             <div class="toolbar-actions">
+              <button class="secondary-btn" id="addAssemblyTextBtn">＋ 自由文本</button>
               <button class="secondary-btn" id="clearAssemblyBtn">清空</button>
               <button class="secondary-btn accent" id="autoLayoutBtn">✦ 自动美化布局</button>
               <label class="export-scale-control" title="选择导出格式和 PNG 分辨率倍率">
@@ -168,6 +169,7 @@
               <div id="nodeLayer" class="node-layer"></div>
               <svg id="wireLayer" class="wire-layer" aria-hidden="true"></svg>
               <div id="nodeControlLayer" class="node-control-layer"></div>
+              <div id="selectionMarquee" class="selection-marquee hidden" aria-hidden="true"></div>
               <div id="assemblyEmpty" class="assembly-empty">
                 <div class="flow-graphic"><span></span><i>＋</i><span></span></div>
                 <h3>开始搭建连接图</h3>
@@ -182,7 +184,7 @@
           <div class="statusbar">
             <span><i class="dot blue"></i><b id="nodeCount">0</b> 块板卡</span>
             <span><i class="dot orange"></i><b id="wireCount">0</b> 根导线</span>
-            <span class="status-help">提示：滚轮缩放 · 单击选择 · Esc 取消接线 · 选中板卡后按 R 旋转、F 翻转</span>
+            <span class="status-help">提示：空白处拖动框选 · Shift 追加框选 · 拖动已选元素整体移动 · Esc 取消接线</span>
           </div>
         </section>
         <aside class="assembly-property-panel">
@@ -197,15 +199,36 @@
             <label class="range-field"><span>画布高度<output id="canvasHeightValue">800</output></span><input id="canvasHeight" type="range" min="400" max="2000" step="50" value="800" /></label>
             <label class="check-field"><input id="defaultShowFromLabels" type="checkbox" checked /><span>默认显示端点 1 信号名</span></label>
             <label class="check-field"><input id="defaultShowToLabels" type="checkbox" checked /><span>默认显示端点 2 信号名</span></label>
+            <h3 class="property-subheading">所有文本默认样式</h3>
+            <label class="range-field"><span>默认字号<output id="defaultTextFontSizeValue">16</output></span><input id="defaultTextFontSize" type="range" min="8" max="72" step="1" value="16" /></label>
+            <label>默认字体<select id="defaultTextFontFamily" class="property-select"><option value="sans-serif">系统无衬线</option><option value="serif">系统衬线</option><option value="monospace">系统等宽</option><option value="Arial">Arial</option><option value="Helvetica">Helvetica</option><option value="Verdana">Verdana</option><option value="Tahoma">Tahoma</option><option value="Georgia">Georgia</option><option value="TimesNewRoman">Times New Roman</option><option value="CourierNew">Courier New</option><option value="MicrosoftYaHei">微软雅黑</option><option value="PingFangSC">苹方</option><option value="NotoSansSC">思源黑体</option><option value="SimHei">黑体</option><option value="SimSun">宋体</option><option value="KaiTi">楷体</option><option value="FangSong">仿宋</option></select></label>
+            <label class="color-field"><span>默认颜色</span><input id="defaultTextColor" type="color" value="#25334a" /></label>
+          </section>
+          <section id="multiPropertyGroup" class="property-group hidden">
+            <h3>批量选择</h3>
+            <div class="wire-endpoint-summary">已选择 <b id="multiSelectionCount">0</b> 项。拖动任一已选板卡或文本即可整体移动；固定板卡保持原位。</div>
           </section>
           <section id="nodePropertyGroup" class="property-group hidden">
             <h3>所选板卡</h3>
             <div id="nodePropertySummary" class="wire-endpoint-summary"></div>
             <label class="check-field"><input id="nodeFixed" type="checkbox" /><span>固定板卡位置</span></label>
             <label class="check-field"><input id="nodeShowName" type="checkbox" checked /><span>显示板卡名称</span></label>
+            <label class="range-field"><span>名称大小<output id="nodeNameFontSizeValue">11</output></span><input id="nodeNameFontSize" type="range" min="8" max="72" step="1" value="11" /></label>
+            <label>名称字体<select id="nodeNameFontFamily" class="property-select"><option value="sans-serif">系统无衬线</option><option value="serif">系统衬线</option><option value="monospace">系统等宽</option><option value="Arial">Arial</option><option value="Helvetica">Helvetica</option><option value="Verdana">Verdana</option><option value="Tahoma">Tahoma</option><option value="Georgia">Georgia</option><option value="TimesNewRoman">Times New Roman</option><option value="CourierNew">Courier New</option><option value="MicrosoftYaHei">微软雅黑</option><option value="PingFangSC">苹方</option><option value="NotoSansSC">思源黑体</option><option value="SimHei">黑体</option><option value="SimSun">宋体</option><option value="KaiTi">楷体</option><option value="FangSong">仿宋</option></select></label>
+            <label class="color-field"><span>名称颜色</span><input id="nodeNameColor" type="color" value="#25334a" /></label>
+            <button type="button" class="secondary-btn full" id="resetNodeNameStyleBtn">名称样式恢复全局默认</button>
             <button type="button" class="secondary-btn full" id="resetNodeNamePositionBtn">名称恢复默认位置</button>
             <div id="nodeInterfaceGaps" class="interface-gap-list"></div>
             <button type="button" class="secondary-btn full" id="resetNodeGapsBtn">全部恢复全局标签间距</button>
+          </section>
+          <section id="textPropertyGroup" class="property-group hidden">
+            <h3>自由文本</h3>
+            <label>文本内容<textarea id="assemblyTextContent" maxlength="500" rows="4"></textarea></label>
+            <label class="range-field"><span>文本大小<output id="assemblyTextFontSizeValue">16</output></span><input id="assemblyTextFontSize" type="range" min="8" max="72" step="1" value="16" /></label>
+            <label>文本字体<select id="assemblyTextFontFamily" class="property-select"><option value="sans-serif">系统无衬线</option><option value="serif">系统衬线</option><option value="monospace">系统等宽</option><option value="Arial">Arial</option><option value="Helvetica">Helvetica</option><option value="Verdana">Verdana</option><option value="Tahoma">Tahoma</option><option value="Georgia">Georgia</option><option value="TimesNewRoman">Times New Roman</option><option value="CourierNew">Courier New</option><option value="MicrosoftYaHei">微软雅黑</option><option value="PingFangSC">苹方</option><option value="NotoSansSC">思源黑体</option><option value="SimHei">黑体</option><option value="SimSun">宋体</option><option value="KaiTi">楷体</option><option value="FangSong">仿宋</option></select></label>
+            <label class="color-field"><span>文本颜色</span><input id="assemblyTextColor" type="color" value="#25334a" /></label>
+            <button type="button" class="secondary-btn full" id="resetAssemblyTextStyleBtn">文本样式恢复全局默认</button>
+            <button type="button" class="danger-link" id="deleteAssemblyTextBtn">删除此文本</button>
           </section>
           <section id="portPropertyGroup" class="property-group hidden">
             <h3>所选端口</h3>

@@ -2,7 +2,7 @@
 
 WireSketch 使用两类 JSON 文件：PCB 描述文件和装配体描述文件。两者都面向人类、程序和 AI，字段语义稳定，不依赖界面实现细节。
 
-PCB 当前 `schemaVersion` 为 `1.1.0`，装配体当前为 `1.4.0`。`schema` URN 中的 `1.0` 和顶层 `version: 1` 表示兼容主版本；1.1 新增方向与节点变换字段，1.2 新增导线显示字段，1.3 新增端口连接模式和连接类型，1.4 新增板卡名称显隐及可拖动位置；这些字段均提供旧文件默认值。
+PCB 当前 `schemaVersion` 为 `1.1.0`，装配体当前为 `1.6.0`。`schema` URN 中的 `1.0` 和顶层 `version: 1` 表示兼容主版本；1.1 新增方向与节点变换字段，1.2 新增导线显示字段，1.3 新增端口连接模式和连接类型，1.4 新增板卡名称显隐及可拖动位置，1.5 新增连接图标题和自由文本样式，1.6 将标题统一为自由文本并增加全局文本默认样式；这些字段均提供旧文件默认值。
 
 - PCB Schema：[schemas/pcb.schema.json](schemas/pcb.schema.json)
 - 装配体 Schema：[schemas/assembly.schema.json](schemas/assembly.schema.json)
@@ -66,6 +66,9 @@ nodes[].id ───── connections[].from/to.nodeId
     ├── scale
     └── interfaceLabelGaps  按接口 ID 覆盖信号标签间距
 
+textDefaults / texts[] ──── 全局默认样式与可拖动文本
+  x / y / style              位置、字号、字体和颜色
+
 wireDefaults ──────────── connections[].pinMap[].style
   全局导线默认值             单根信号线可选覆盖值
 ```
@@ -79,6 +82,10 @@ wireDefaults ──────────── connections[].pinMap[].style
 `nodes[].scale` 控制单个板卡实例的显示大小，当前范围为 `0.5` 到 `2`。PCB 图片、接口位置、针脚端点、避障区域和导出结果必须同步缩放；省略时按 `1` 处理。
 
 `nodes[].fixed` 为 `true` 时，板卡实例不能拖动，自动布局也不得改变其 `x`、`y`；旋转、翻转和缩放不受影响。省略时按 `false` 处理。
+
+`nodes[].nameStyle` 控制板卡名称的字号、字体和颜色；`nameOffset` 保存相对板卡图片中心的拖动位置，`showName` 控制名称显隐。
+
+`textDefaults` 是板卡名称、标题和自由文本共同继承的默认字号、字体与颜色。单个节点的 `nameStyle` 或单条 `texts[]` 的 `style` 可覆盖默认值；删除覆盖样式即可重新跟随全局设置。`texts[]` 保存所有可拖动文字，原连接图标题在 1.6 中也作为普通自由文本保存、编辑和删除。`fontFamily` 使用稳定的字体标识；渲染时会按系统字体回退链选择可用字体。
 
 `nodes[].interfaceLabelGaps` 按接口 ID 保存同一接口相邻信号名称标签之间增加的间距，范围为 `0` 到 `24`。未设置的接口继承装配体 `wireDefaults.labelGap`。该字段只改变 `5V`、`GND`、`3V3` 等标签的排版位置，不改变任何导线路径或端点坐标。
 

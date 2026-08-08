@@ -161,6 +161,11 @@ main, .workspace { height: calc(100vh - 68px); }
 .property-group h3 { margin: 0 0 13px; font-size: 12px; }
 .property-group label { display: block; margin-bottom: 12px; color: #5d6a7f; font-size: 10px; font-weight: 700; }
 .property-group input[type="number"], #wireDisplayName { width: 100%; height: 35px; margin-top: 5px; padding: 0 9px; border: 1px solid #d9e0e8; border-radius: 6px; color: var(--ink); background: white; outline: none; }
+.property-group textarea, .property-select { width: 100%; margin-top: 5px; padding: 7px 9px; border: 1px solid #d9e0e8; border-radius: 6px; color: var(--ink); background: white; outline: none; resize: vertical; }
+.property-select { height: 35px; padding: 0 9px; }
+.property-subheading { margin-top: 20px !important; padding-top: 14px; border-top: 1px solid #edf0f4; }
+.color-field { display: flex !important; align-items: center; justify-content: space-between; gap: 12px; }
+.color-field input[type="color"] { width: 44px; height: 30px; padding: 2px; border: 1px solid #d9e0e8; border-radius: 6px; background: white; }
 .property-group input:focus { border-color: #7ba2f6; box-shadow: 0 0 0 3px rgba(39,100,231,.08); }
 .range-field > span { display: flex; align-items: center; justify-content: space-between; margin-bottom: 7px; }
 .range-field output { min-width: 38px; padding: 2px 6px; border-radius: 10px; background: var(--blue-soft); color: var(--blue); text-align: center; font: 750 9px ui-monospace, monospace; }
@@ -189,8 +194,10 @@ main, .workspace { height: calc(100vh - 68px); }
 .node-layer { z-index: 1; pointer-events: none; }
 .wire-layer { z-index: 2; overflow: visible; pointer-events: none; }
 .node-control-layer { z-index: 3; pointer-events: none; }
+.selection-marquee { position: absolute; z-index: 5; border: 1px solid #2764e7; background: rgba(39,100,231,.12); box-shadow: 0 0 0 1px rgba(255,255,255,.75) inset; pointer-events: none; }
 .node-controls { position: absolute; width: 230px; height: 215px; pointer-events: none; }
 .node-controls .node-port, .node-controls .node-pin, .node-controls .node-name-label { pointer-events: auto; }
+.node-control-layer .assembly-text-element { pointer-events: auto; }
 .wire-group { cursor: default; }
 .wire-group.bundle-selectable { cursor: pointer; }
 .wire-hit { stroke: transparent; stroke-width: 14; fill: none; pointer-events: none; }
@@ -226,8 +233,10 @@ main, .workspace { height: calc(100vh - 68px); }
 .node-remove:hover { color: #d34d4d; background: #fff0f0; }
 .node-body { position: absolute; inset: 0; }
 .node-body img { position: absolute; object-fit: fill; filter: drop-shadow(0 4px 5px rgba(27,38,54,.2)); pointer-events: none; }
-.node-name-label { position: absolute; z-index: 10; max-width: 190px; padding: 3px 7px; transform: translate(-50%,-50%); overflow: hidden; border: 1px solid transparent; border-radius: 5px; color: #25334a; background: rgba(255,255,255,.88); font-size: 11px; font-weight: 800; line-height: 1.2; text-overflow: ellipsis; text-shadow: 0 1px 0 white; white-space: nowrap; cursor: move; touch-action: none; }
+.node-name-label { position: absolute; z-index: 10; max-width: 260px; padding: 3px 7px; transform: translate(-50%,-50%); overflow: hidden; border: 1px solid transparent; border-radius: 5px; background: rgba(255,255,255,.88); font-weight: 800; line-height: 1.2; text-overflow: ellipsis; text-shadow: 0 1px 0 white; white-space: nowrap; cursor: move; touch-action: none; }
 .node-name-label:hover, .node-name-label.selected { border-color: #8facf0; box-shadow: 0 2px 8px rgba(39,100,231,.18); }
+.assembly-text-element { position: absolute; z-index: 12; min-width: 16px; max-width: 560px; padding: 0; overflow: visible; border: 0; border-radius: 3px; outline: 1px solid transparent; color: #25334a; background: transparent; line-height: 1.25; text-align: left; white-space: pre-wrap; cursor: move; touch-action: none; }
+.assembly-text-element:hover, .assembly-text-element.selected { outline-color: #8facf0; background: rgba(255,255,255,.72); box-shadow: 0 2px 8px rgba(39,100,231,.16); }
 .node-placeholder { position: absolute; left: 65px; top: 52px; width: 100px; height: 70px; border-radius: 5px; background: linear-gradient(145deg,#365d4c,#19382d); border: 5px solid #c69d41; display: grid; place-items: center; color: #dbece4; font-size: 10px; }
 .node-port { position: absolute; width: 20px; height: 20px; border: 0; background: transparent; display: grid; place-items: center; padding: 0; z-index: 3; transform: translate(-50%,-50%); }
 .port-dot { width: 12px; height: 12px; background: white; border: 3px solid #5273b0; border-radius: 50%; box-shadow: 0 0 0 2px white; transition: .15s; }
