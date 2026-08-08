@@ -1,6 +1,6 @@
 {
   "schema": "urn:wiresketch:schema:assembly:1.0",
-  "schemaVersion": "1.1.0",
+  "schemaVersion": "1.6.0",
   "kind": "wiresketch/assembly",
   "version": 1,
   "id": "assembly_uart_demo",
@@ -13,13 +13,18 @@
     "unit": "diagram-px",
     "routing": "orthogonal"
   },
+  "canvasSize": { "width": 1200, "height": 800 },
+  "textDefaults": { "fontSize": 16, "fontFamily": "sans-serif", "fontWeight": 500, "color": "#25334a", "shadow": { "enabled": false, "color": "#000000", "blur": 3, "offsetX": 0, "offsetY": 2 } },
+  "texts": [{ "id": "text_title", "role": "title", "text": "UART 调试连接", "x": 30, "y": 25 }],
+  "wireDefaults": { "width": 2.2, "labelGap": 6, "routeGap": 6, "cornerRadius": 0, "showFromLabels": true, "showToLabels": true },
   "nodes": [
-    { "id": "node_controller", "boardId": "pcb_controller", "label": "主控板", "x": 80, "y": 100, "rotation": 0, "flipX": false, "scale": 1 },
-    { "id": "node_debugger", "boardId": "pcb_debugger", "label": "USB-TTL", "x": 390, "y": 100, "rotation": 90, "flipX": true, "scale": 1.2 }
+    { "id": "node_controller", "boardId": "pcb_controller", "label": "主控板", "x": 80, "y": 100, "rotation": 0, "flipX": false, "scale": 1, "fixed": false, "showName": true },
+    { "id": "node_debugger", "boardId": "pcb_debugger", "label": "USB-TTL", "x": 390, "y": 100, "rotation": 90, "flipX": true, "scale": 1.2, "fixed": false, "showName": true }
   ],
   "connections": [
     {
       "id": "wire_uart0",
+      "mode": "bundle",
       "description": "UART 信号交叉连接，共地。",
       "from": { "nodeId": "node_controller", "interfaceId": "if_uart0" },
       "to": { "nodeId": "node_debugger", "interfaceId": "if_uart" },

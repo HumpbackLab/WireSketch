@@ -1,6 +1,6 @@
 {
   "schema": "urn:wiresketch:schema:assembly:1.0",
-  "schemaVersion": "1.1.0",
+  "schemaVersion": "1.6.0",
   "kind": "wiresketch/assembly",
   "version": 1,
   "id": "assembly_msej7xb9_d2y58",
@@ -13,6 +13,10 @@
     "unit": "diagram-px",
     "routing": "orthogonal"
   },
+  "canvasSize": { "width": 1200, "height": 800 },
+  "textDefaults": { "fontSize": 16, "fontFamily": "sans-serif", "fontWeight": 500, "color": "#25334a", "shadow": { "enabled": false, "color": "#000000", "blur": 3, "offsetX": 0, "offsetY": 2 } },
+  "texts": [{ "id": "text_title", "role": "title", "text": "新建连接图", "x": 30, "y": 25 }],
+  "wireDefaults": { "width": 2.2, "labelGap": 6, "routeGap": 6, "cornerRadius": 0, "showFromLabels": true, "showToLabels": true },
   "nodes": [
     {
       "id": "node_msek383c_6tiwb",
@@ -22,7 +26,9 @@
       "y": 290,
       "rotation": 0,
       "flipX": false,
-      "scale": 1
+      "scale": 1,
+      "fixed": false,
+      "showName": true
     },
     {
       "id": "node_msek3cy6_vgf0o",
@@ -32,7 +38,9 @@
       "y": 250,
       "rotation": 0,
       "flipX": false,
-      "scale": 1
+      "scale": 1,
+      "fixed": false,
+      "showName": true
     },
     {
       "id": "node_msek3zp3_eol7l",
@@ -42,12 +50,15 @@
       "y": 49.5,
       "rotation": 0,
       "flipX": false,
-      "scale": 1
+      "scale": 1,
+      "fixed": false,
+      "showName": true
     }
   ],
   "connections": [
     {
       "id": "wire_msek3h1z_uo1pi",
+      "mode": "bundle",
       "description": "",
       "from": {
         "nodeId": "node_msek383c_6tiwb",
@@ -86,6 +97,7 @@
     },
     {
       "id": "wire_msek3jef_0ke83",
+      "mode": "bundle",
       "description": "",
       "from": {
         "nodeId": "node_msek3cy6_vgf0o",
@@ -116,6 +128,7 @@
     },
     {
       "id": "wire_msek435r_f8zpo",
+      "mode": "bundle",
       "description": "",
       "from": {
         "nodeId": "node_msek3zp3_eol7l",
@@ -146,6 +159,7 @@
     },
     {
       "id": "wire_msek44l3_khw0s",
+      "mode": "bundle",
       "description": "",
       "from": {
         "nodeId": "node_msek3zp3_eol7l",
@@ -172,6 +186,7 @@
     },
     {
       "id": "wire_msek6b8i_c7f0f",
+      "mode": "bundle",
       "description": "",
       "from": {
         "nodeId": "node_msek383c_6tiwb",

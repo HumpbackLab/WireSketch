@@ -202,7 +202,13 @@
             <h3 class="property-subheading">所有文本默认样式</h3>
             <label class="range-field"><span>默认字号<output id="defaultTextFontSizeValue">16</output></span><input id="defaultTextFontSize" type="range" min="8" max="72" step="1" value="16" /></label>
             <label>默认字体<select id="defaultTextFontFamily" class="property-select"><option value="sans-serif">系统无衬线</option><option value="serif">系统衬线</option><option value="monospace">系统等宽</option><option value="Arial">Arial</option><option value="Helvetica">Helvetica</option><option value="Verdana">Verdana</option><option value="Tahoma">Tahoma</option><option value="Georgia">Georgia</option><option value="TimesNewRoman">Times New Roman</option><option value="CourierNew">Courier New</option><option value="MicrosoftYaHei">微软雅黑</option><option value="PingFangSC">苹方</option><option value="NotoSansSC">思源黑体</option><option value="SimHei">黑体</option><option value="SimSun">宋体</option><option value="KaiTi">楷体</option><option value="FangSong">仿宋</option></select></label>
+            <label>默认字重<select id="defaultTextFontWeight" class="property-select"><option value="300">细体</option><option value="500" selected>中等</option><option value="700">粗体</option></select></label>
             <label class="color-field"><span>默认颜色</span><input id="defaultTextColor" type="color" value="#25334a" /></label>
+            <label class="check-field"><input id="defaultTextShadowEnabled" type="checkbox" /><span>默认文字阴影</span></label>
+            <label class="color-field"><span>默认阴影颜色</span><input id="defaultTextShadowColor" type="color" value="#000000" /></label>
+            <label class="range-field"><span>默认阴影模糊<output id="defaultTextShadowBlurValue">3</output></span><input id="defaultTextShadowBlur" type="range" min="0" max="12" step="1" value="3" /></label>
+            <label class="range-field"><span>默认阴影 X<output id="defaultTextShadowXValue">0</output></span><input id="defaultTextShadowX" type="range" min="-10" max="10" step="1" value="0" /></label>
+            <label class="range-field"><span>默认阴影 Y<output id="defaultTextShadowYValue">2</output></span><input id="defaultTextShadowY" type="range" min="-10" max="10" step="1" value="2" /></label>
           </section>
           <section id="multiPropertyGroup" class="property-group hidden">
             <h3>批量选择</h3>
@@ -215,7 +221,13 @@
             <label class="check-field"><input id="nodeShowName" type="checkbox" checked /><span>显示板卡名称</span></label>
             <label class="range-field"><span>名称大小<output id="nodeNameFontSizeValue">11</output></span><input id="nodeNameFontSize" type="range" min="8" max="72" step="1" value="11" /></label>
             <label>名称字体<select id="nodeNameFontFamily" class="property-select"><option value="sans-serif">系统无衬线</option><option value="serif">系统衬线</option><option value="monospace">系统等宽</option><option value="Arial">Arial</option><option value="Helvetica">Helvetica</option><option value="Verdana">Verdana</option><option value="Tahoma">Tahoma</option><option value="Georgia">Georgia</option><option value="TimesNewRoman">Times New Roman</option><option value="CourierNew">Courier New</option><option value="MicrosoftYaHei">微软雅黑</option><option value="PingFangSC">苹方</option><option value="NotoSansSC">思源黑体</option><option value="SimHei">黑体</option><option value="SimSun">宋体</option><option value="KaiTi">楷体</option><option value="FangSong">仿宋</option></select></label>
+            <label>名称字重<select id="nodeNameFontWeight" class="property-select"><option value="300">细体</option><option value="500">中等</option><option value="700">粗体</option></select></label>
             <label class="color-field"><span>名称颜色</span><input id="nodeNameColor" type="color" value="#25334a" /></label>
+            <label class="check-field"><input id="nodeNameShadowEnabled" type="checkbox" /><span>名称阴影</span></label>
+            <label class="color-field"><span>阴影颜色</span><input id="nodeNameShadowColor" type="color" value="#000000" /></label>
+            <label class="range-field"><span>阴影模糊<output id="nodeNameShadowBlurValue">3</output></span><input id="nodeNameShadowBlur" type="range" min="0" max="12" step="1" value="3" /></label>
+            <label class="range-field"><span>阴影 X<output id="nodeNameShadowXValue">0</output></span><input id="nodeNameShadowX" type="range" min="-10" max="10" step="1" value="0" /></label>
+            <label class="range-field"><span>阴影 Y<output id="nodeNameShadowYValue">2</output></span><input id="nodeNameShadowY" type="range" min="-10" max="10" step="1" value="2" /></label>
             <button type="button" class="secondary-btn full" id="resetNodeNameStyleBtn">名称样式恢复全局默认</button>
             <button type="button" class="secondary-btn full" id="resetNodeNamePositionBtn">名称恢复默认位置</button>
             <div id="nodeInterfaceGaps" class="interface-gap-list"></div>
@@ -226,7 +238,13 @@
             <label>文本内容<textarea id="assemblyTextContent" maxlength="500" rows="4"></textarea></label>
             <label class="range-field"><span>文本大小<output id="assemblyTextFontSizeValue">16</output></span><input id="assemblyTextFontSize" type="range" min="8" max="72" step="1" value="16" /></label>
             <label>文本字体<select id="assemblyTextFontFamily" class="property-select"><option value="sans-serif">系统无衬线</option><option value="serif">系统衬线</option><option value="monospace">系统等宽</option><option value="Arial">Arial</option><option value="Helvetica">Helvetica</option><option value="Verdana">Verdana</option><option value="Tahoma">Tahoma</option><option value="Georgia">Georgia</option><option value="TimesNewRoman">Times New Roman</option><option value="CourierNew">Courier New</option><option value="MicrosoftYaHei">微软雅黑</option><option value="PingFangSC">苹方</option><option value="NotoSansSC">思源黑体</option><option value="SimHei">黑体</option><option value="SimSun">宋体</option><option value="KaiTi">楷体</option><option value="FangSong">仿宋</option></select></label>
+            <label>文本字重<select id="assemblyTextFontWeight" class="property-select"><option value="300">细体</option><option value="500">中等</option><option value="700">粗体</option></select></label>
             <label class="color-field"><span>文本颜色</span><input id="assemblyTextColor" type="color" value="#25334a" /></label>
+            <label class="check-field"><input id="assemblyTextShadowEnabled" type="checkbox" /><span>文字阴影</span></label>
+            <label class="color-field"><span>阴影颜色</span><input id="assemblyTextShadowColor" type="color" value="#000000" /></label>
+            <label class="range-field"><span>阴影模糊<output id="assemblyTextShadowBlurValue">3</output></span><input id="assemblyTextShadowBlur" type="range" min="0" max="12" step="1" value="3" /></label>
+            <label class="range-field"><span>阴影 X<output id="assemblyTextShadowXValue">0</output></span><input id="assemblyTextShadowX" type="range" min="-10" max="10" step="1" value="0" /></label>
+            <label class="range-field"><span>阴影 Y<output id="assemblyTextShadowYValue">2</output></span><input id="assemblyTextShadowY" type="range" min="-10" max="10" step="1" value="2" /></label>
             <button type="button" class="secondary-btn full" id="resetAssemblyTextStyleBtn">文本样式恢复全局默认</button>
             <button type="button" class="danger-link" id="deleteAssemblyTextBtn">删除此文本</button>
           </section>

@@ -14,8 +14,9 @@
     usb: ['VCC', 'GND', 'DP', 'DN']
   };
   const DEFAULT_WIRE_STYLE = {width:2.2, gap:6, routeGap:6, cornerRadius:0, showFromLabels:true, showToLabels:true};
-  const DEFAULT_TITLE_STYLE = {fontSize:20,fontFamily:'sans-serif',color:'#111827'};
-  const DEFAULT_FREE_TEXT_STYLE = {fontSize:16,fontFamily:'sans-serif',color:'#25334a'};
+  const DEFAULT_FREE_TEXT_STYLE = {fontSize:16,fontFamily:'sans-serif',fontWeight:500,color:'#25334a',shadow:{enabled:false,color:'#000000',blur:3,offsetX:0,offsetY:2}};
+  const FONT_WEIGHTS = [300,500,700];
+  const COMPATIBLE_FONT_WEIGHTS = [300,400,500,600,700,800,900];
   const FONT_FAMILIES = {
     'sans-serif':'Inter,ui-sans-serif,system-ui,sans-serif',
     serif:'Georgia,"Times New Roman",serif',
@@ -69,7 +70,6 @@
   ];
 
   let state = loadState();
-  migrateAssemblyTextModel(state.assembly);
   let selectedBoardId = state.boards[0]?.id || null;
   let selectedInterfaceId = null;
   let selectedNodeId = null;
@@ -134,7 +134,7 @@
     try {
       if(typeof localStorage==='undefined')throw new Error('No browser storage');
       const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
-      if (saved?.boards && saved?.assembly) {
+      if (saved?.boards) {
         saved.boards.forEach(board => {
           if (board.builtIn == null) board.builtIn = DEFAULT_BOARD_NAMES.includes(board.name);
           if (!board.image) {
@@ -146,10 +146,15 @@
           }
           if (board.source==='generated') refreshGeneratedBoard(board);
         });
-        return saved;
+        if(isAssemblyDocument({...saved.assembly,embeddedBoards:[]}))return saved;
+        return {boards:saved.boards,assembly:createAssembly()};
       }
     } catch (_) {}
-    return { boards: demoBoards(), assembly: {kind:'wiresketch/assembly', version:1, id:uid('assembly'), name:'新建连接图', nodes:[], connections:[]} };
+    return {boards:demoBoards(),assembly:createAssembly()};
+  }
+
+  function createAssembly() {
+    return {schema:ASSEMBLY_SCHEMA_ID,schemaVersion:'1.6.0',kind:'wiresketch/assembly',version:1,id:uid('assembly'),name:'新建连接图',description:'',layout:{origin:'top-left',axisX:'right',axisY:'down',unit:'diagram-px',routing:'hybrid'},canvasSize:{width:1200,height:800},textDefaults:{...DEFAULT_FREE_TEXT_STYLE},texts:[{id:uid('text'),role:'title',text:'新建连接图',x:30,y:25}],wireDefaults:{width:DEFAULT_WIRE_STYLE.width,labelGap:DEFAULT_WIRE_STYLE.gap,routeGap:DEFAULT_WIRE_STYLE.routeGap,cornerRadius:DEFAULT_WIRE_STYLE.cornerRadius,showFromLabels:true,showToLabels:true},nodes:[],connections:[]};
   }
 
   function refreshGeneratedBoard(board) {
@@ -207,28 +212,41 @@
   function nodeFixed(node) { return node?.fixed===true; }
   function nodeNameVisible(node) { return node?.showName!==false; }
   function normalizedTextStyle(style,defaults) {
-    const fontSize=Number(style?.fontSize),fontFamily=FONT_FAMILIES[style?.fontFamily]?style.fontFamily:defaults.fontFamily,color=/^#[0-9a-f]{6}$/i.test(style?.color||'')?style.color:defaults.color;
-    return {fontSize:Number.isFinite(fontSize)?Math.max(8,Math.min(72,fontSize)):defaults.fontSize,fontFamily,color};
+    const fontSize=Number(style?.fontSize),requestedWeight=Number(style?.fontWeight),fontFamily=FONT_FAMILIES[style?.fontFamily]?style.fontFamily:defaults.fontFamily,color=/^#[0-9a-f]{6}$/i.test(style?.color||'')?style.color:defaults.color;
+    const fallbackShadow=defaults.shadow||DEFAULT_FREE_TEXT_STYLE.shadow,configuredShadow=style?.shadow||{},blur=Number(configuredShadow.blur),offsetX=Number(configuredShadow.offsetX),offsetY=Number(configuredShadow.offsetY);
+    const shadow={enabled:typeof configuredShadow.enabled==='boolean'?configuredShadow.enabled:fallbackShadow.enabled,color:/^#[0-9a-f]{6}$/i.test(configuredShadow.color||'')?configuredShadow.color:fallbackShadow.color,blur:Number.isFinite(blur)?Math.max(0,Math.min(12,blur)):fallbackShadow.blur,offsetX:Number.isFinite(offsetX)?Math.max(-10,Math.min(10,offsetX)):fallbackShadow.offsetX,offsetY:Number.isFinite(offsetY)?Math.max(-10,Math.min(10,offsetY)):fallbackShadow.offsetY};
+    const fallbackWeight=FONT_WEIGHTS.includes(Number(defaults.fontWeight))?Number(defaults.fontWeight):DEFAULT_FREE_TEXT_STYLE.fontWeight;
+    const fontWeight=COMPATIBLE_FONT_WEIGHTS.includes(requestedWeight)?(requestedWeight<=400?300:requestedWeight<=600?500:700):fallbackWeight;
+    return {fontSize:Number.isFinite(fontSize)?Math.max(8,Math.min(72,fontSize)):defaults.fontSize,fontFamily,fontWeight,color,shadow};
   }
   function textFontCss(style) { return FONT_FAMILIES[style.fontFamily]||FONT_FAMILIES['sans-serif']; }
+  function textShadowCss(style) { return style.shadow.enabled?`${style.shadow.offsetX}px ${style.shadow.offsetY}px ${style.shadow.blur}px ${style.shadow.color}`:'none'; }
+  function textInlineStyle(style) { return `font-size:${style.fontSize}px;font-family:${escapeHtml(textFontCss(style))};font-weight:${style.fontWeight};color:${style.color};text-shadow:${textShadowCss(style)}`; }
+  function withTextStyleChange(style,property,value) {
+    if(!property.startsWith('shadow.'))return {...style,[property]:value};
+    return {...style,shadow:{...style.shadow,[property.slice(7)]:value}};
+  }
+  function populateTextStyleControls(prefix,style) {
+    $(`#${prefix}FontWeight`).value=style.fontWeight;
+    $(`#${prefix}ShadowEnabled`).checked=style.shadow.enabled;
+    $(`#${prefix}ShadowColor`).value=style.shadow.color;
+    $(`#${prefix}ShadowBlur`).value=style.shadow.blur;$(`#${prefix}ShadowBlurValue`).value=style.shadow.blur;
+    $(`#${prefix}ShadowX`).value=style.shadow.offsetX;$(`#${prefix}ShadowXValue`).value=style.shadow.offsetX;
+    $(`#${prefix}ShadowY`).value=style.shadow.offsetY;$(`#${prefix}ShadowYValue`).value=style.shadow.offsetY;
+  }
+  function bindExtendedTextStyleControls(prefix,update) {
+    $(`#${prefix}FontWeight`).onchange=event=>update('fontWeight',Number(event.target.value));
+    $(`#${prefix}ShadowEnabled`).onchange=event=>update('shadow.enabled',event.target.checked);
+    $(`#${prefix}ShadowColor`).oninput=event=>update('shadow.color',event.target.value);
+    $(`#${prefix}ShadowBlur`).oninput=event=>update('shadow.blur',Number(event.target.value));
+    $(`#${prefix}ShadowX`).oninput=event=>update('shadow.offsetX',Number(event.target.value));
+    $(`#${prefix}ShadowY`).oninput=event=>update('shadow.offsetY',Number(event.target.value));
+  }
   function assemblyTextDefaults(assembly=state.assembly) { return normalizedTextStyle(assembly?.textDefaults,DEFAULT_FREE_TEXT_STYLE); }
   function nodeNameStyle(node) { return normalizedTextStyle(node?.nameStyle,assemblyTextDefaults()); }
   function freeTextStyle(item) { return normalizedTextStyle(item?.style,assemblyTextDefaults()); }
   function assemblyTexts() { return Array.isArray(state.assembly.texts)?state.assembly.texts:[]; }
-  function migrateAssemblyTextModel(assembly) {
-    if(!assembly)return;
-    assembly.texts=Array.isArray(assembly.texts)?assembly.texts:[];
-    assembly.textDefaults=assemblyTextDefaults(assembly);
-    if(assembly.schemaVersion!=='1.6.0'){
-      assembly.texts.forEach(item=>{const style=item.style;if(style&&style.fontSize===DEFAULT_FREE_TEXT_STYLE.fontSize&&style.fontFamily===DEFAULT_FREE_TEXT_STYLE.fontFamily&&String(style.color).toLowerCase()===DEFAULT_FREE_TEXT_STYLE.color)delete item.style;});
-      if(!assembly.texts.some(item=>item.role==='title')&&assembly.title?.showInExport!==false){
-        const title=assembly.title||{};
-        assembly.texts.unshift({id:uid('text'),role:'title',text:assembly.name||'新建连接图',x:Number.isFinite(Number(title.x))?Number(title.x):30,y:Number.isFinite(Number(title.y))?Number(title.y):25,...(title.style?{style:normalizedTextStyle(title.style,DEFAULT_TITLE_STYLE)}:{})});
-      }
-      delete assembly.title;assembly.schemaVersion='1.6.0';
-    }
-  }
-  function selectionKey(kind,id) { return kind==='title'?'title':`${kind}:${id}`; }
+  function selectionKey(kind,id) { return `${kind}:${id}`; }
   function activateSelectedItem(kind,id,{preserveGroup=false}={}) {
     const key=selectionKey(kind,id);
     if(!preserveGroup||!selectedItemKeys.has(key))selectedItemKeys=new Set([key]);
@@ -250,7 +268,7 @@
   }
   function assemblyWireDefaults() {
     const configured=state.assembly.wireDefaults||{};
-    const labelGap=Number(configured.labelGap??configured.gap);
+    const labelGap=Number(configured.labelGap);
     const routeGap=Number(configured.routeGap);
     const cornerRadius=Number(configured.cornerRadius);
     return {
@@ -281,7 +299,7 @@
     return Number.isFinite(configured)&&configured>=0&&configured<=20?configured:assemblyWireDefaults().routeGap;
   }
   function interfaceLabelGap(node,interfaceId) {
-    const configured=Number(node?.interfaceLabelGaps?.[interfaceId]??node?.interfaceSignalGaps?.[interfaceId]);
+    const configured=Number(node?.interfaceLabelGaps?.[interfaceId]);
     return Number.isFinite(configured)&&configured>=0&&configured<=24?configured:assemblyWireDefaults().gap;
   }
   function assemblyCanvasSize() {
@@ -720,7 +738,7 @@
       textDefaults:assemblyTextDefaults(),
       texts:assemblyTexts().map(item=>({id:item.id,...(item.role==='title'?{role:'title'}:{}),text:String(item.text||''),x:Number(item.x)||0,y:Number(item.y)||0,...(item.style?{style:freeTextStyle(item)}:{})})),
       wireDefaults:{width:wireDefaults.width,labelGap:wireDefaults.gap,routeGap:wireDefaults.routeGap,cornerRadius:wireDefaults.cornerRadius,showFromLabels:wireDefaults.showFromLabels,showToLabels:wireDefaults.showToLabels},
-      nodes:state.assembly.nodes.map(node=>{const labelGaps=node.interfaceLabelGaps||node.interfaceSignalGaps,modes=node.interfaceConnectionModes;return {id:node.id,boardId:node.boardId,label:node.label,x:node.x,y:node.y,rotation:nodeRotation(node),flipX:nodeFlipX(node),scale:nodeScale(node),fixed:nodeFixed(node),showName:nodeNameVisible(node),...(node.nameStyle?{nameStyle:nodeNameStyle(node)}:{}),...(node.nameOffset?{nameOffset:{x:Number(node.nameOffset.x)||0,y:Number(node.nameOffset.y)||0}}:{}),...(labelGaps?{interfaceLabelGaps:{...labelGaps}}:{}),...(modes&&Object.keys(modes).length?{interfaceConnectionModes:{...modes}}:{})};}),
+      nodes:state.assembly.nodes.map(node=>{const labelGaps=node.interfaceLabelGaps,modes=node.interfaceConnectionModes;return {id:node.id,boardId:node.boardId,label:node.label,x:node.x,y:node.y,rotation:nodeRotation(node),flipX:nodeFlipX(node),scale:nodeScale(node),fixed:nodeFixed(node),showName:nodeNameVisible(node),...(node.nameStyle?{nameStyle:nodeNameStyle(node)}:{}),...(node.nameOffset?{nameOffset:{x:Number(node.nameOffset.x)||0,y:Number(node.nameOffset.y)||0}}:{}),...(labelGaps?{interfaceLabelGaps:{...labelGaps}}:{}),...(modes&&Object.keys(modes).length?{interfaceConnectionModes:{...modes}}:{})};}),
       connections:state.assembly.connections.map(connection=>({
         id:connection.id,
         mode:connectionMode(connection),
@@ -768,7 +786,7 @@
   function addNode(boardId, at) {
     const board = state.boards.find(b => b.id === boardId); if (!board) return;
     const n = state.assembly.nodes.length;
-    state.assembly.nodes.push({id:uid('node'), boardId, label:board.name, x:at?.x ?? 90+(n%4)*285, y:at?.y ?? 70+Math.floor(n/4)*250, rotation:0, flipX:false, scale:1});
+    state.assembly.nodes.push({id:uid('node'),boardId,label:board.name,x:at?.x??90+(n%4)*285,y:at?.y??70+Math.floor(n/4)*250,rotation:0,flipX:false,scale:1,fixed:false,showName:true});
     saveState(); renderAssembly();
   }
 
@@ -807,11 +825,11 @@
       const source=geometry.source,rotation=nodeRotation(node),scaleX=nodeFlipX(node)?-1:1;
       const imageSource=board.source==='generated'?placeholderSvg('',board.generated?.width,board.generated?.height,board.generated?.color):boardImageSource(board);
       const nodeSelected=selectedItemKeys.has(selectionKey('node',node.id))||node.id===selectedNodeId;
-      const nameOffset=nodeNameOffset(board,node),nameStyle=nodeNameStyle(node),nameLabel=nodeNameVisible(node)?`<button type="button" class="node-name-label ${nodeSelected?'selected':''}" data-node-name="${node.id}" style="left:${geometry.centerX+nameOffset.x}px;top:${geometry.centerY+nameOffset.y}px;font-size:${nameStyle.fontSize}px;font-family:${escapeHtml(textFontCss(nameStyle))};color:${nameStyle.color}" title="拖动板卡名称">${escapeHtml(node.label)}</button>`:'';
+      const nameOffset=nodeNameOffset(board,node),nameStyle=nodeNameStyle(node),nameLabel=nodeNameVisible(node)?`<button type="button" class="node-name-label ${nodeSelected?'selected':''}" data-node-name="${node.id}" style="left:${geometry.centerX+nameOffset.x}px;top:${geometry.centerY+nameOffset.y}px;${textInlineStyle(nameStyle)}" title="拖动板卡名称">${escapeHtml(node.label)}</button>`:'';
       controls.push(`<div class="node-controls" data-id="${node.id}" style="left:${node.x}px;top:${node.y}px">${ports}${pins}${nameLabel}</div>`);
       return `<article class="board-node ${nodeSelected?'selected':''} ${nodeFixed(node)?'fixed':''}" data-id="${node.id}" style="left:${node.x}px;top:${node.y}px"><div class="node-body">${imageSource?`<img src="${imageSource}" data-board="${board.id}" alt="" style="left:${source.x}px;top:${source.y}px;width:${source.width}px;height:${source.height}px;transform:rotate(${rotation}deg) scaleX(${scaleX});transform-origin:center">`:`<div class="node-placeholder" style="transform:rotate(${rotation}deg) scaleX(${scaleX})"></div>`}</div><footer class="node-header"><span class="node-header-spacer">${nodeFixed(node)?'<span class="node-fixed-mark" title="位置已固定">◆</span>':''}</span><button class="node-action node-scale-down" title="缩小板卡">−</button><span class="node-scale-label">${Math.round(nodeScale(node)*100)}%</span><button class="node-action node-scale-up" title="放大板卡">＋</button><button class="node-action node-flip" title="水平翻转">⇆</button><button class="node-action node-rotate" title="顺时针旋转 90°">↻</button><button class="node-action node-remove" title="移除板卡">×</button></footer></article>`;
     }).join('');
-    const textMarkup=assemblyTexts().map(item=>{const style=freeTextStyle(item);return `<button type="button" class="assembly-text-element ${selectedItemKeys.has(selectionKey('free',item.id))||item.id===selectedTextId?'selected':''}" data-text-kind="free" data-text-id="${item.id}" style="left:${Number(item.x)||0}px;top:${Number(item.y)||0}px;font-size:${style.fontSize}px;font-family:${escapeHtml(textFontCss(style))};color:${style.color}">${escapeHtml(item.text||'自由文本')}</button>`;}).join('');
+    const textMarkup=assemblyTexts().map(item=>{const style=freeTextStyle(item);return `<button type="button" class="assembly-text-element ${selectedItemKeys.has(selectionKey('free',item.id))||item.id===selectedTextId?'selected':''}" data-text-kind="free" data-text-id="${item.id}" style="left:${Number(item.x)||0}px;top:${Number(item.y)||0}px;${textInlineStyle(style)}">${escapeHtml(item.text||'自由文本')}</button>`;}).join('');
     controlLayer.innerHTML=controls.join('')+textMarkup;
     $$('.board-node').forEach(nodeEl => {
       const selectNode=(preserveGroup=false)=>{activateSelectedItem('node',nodeEl.dataset.id,{preserveGroup});renderSelection();};
@@ -919,6 +937,7 @@
     const textDefaults=assemblyTextDefaults();
     $('#defaultTextFontSize').value=textDefaults.fontSize;$('#defaultTextFontSizeValue').value=textDefaults.fontSize;
     $('#defaultTextFontFamily').value=textDefaults.fontFamily;$('#defaultTextColor').value=textDefaults.color;
+    populateTextStyleControls('defaultText',textDefaults);
     const node=state.assembly.nodes.find(item=>item.id===selectedNodeId),board=state.boards.find(item=>item.id===node?.boardId);
     const textItem=assemblyTexts().find(item=>item.id===selectedTextId);
     const portNode=state.assembly.nodes.find(item=>item.id===selectedPort?.nodeId),portBoard=state.boards.find(item=>item.id===portNode?.boardId),portInterface=portBoard?.interfaces.find(item=>item.id===selectedPort?.interfaceId);
@@ -938,15 +957,17 @@
       $('#nodeShowName').checked=nodeNameVisible(node);
       $('#nodeNameFontSize').value=style.fontSize;$('#nodeNameFontSizeValue').value=style.fontSize;
       $('#nodeNameFontFamily').value=style.fontFamily;$('#nodeNameColor').value=style.color;
+      populateTextStyleControls('nodeName',style);
       $('#resetNodeNameStyleBtn').disabled=!node.nameStyle;
       $('#resetNodeNamePositionBtn').disabled=!node.nameOffset;
-      $('#nodeInterfaceGaps').innerHTML=board.interfaces.map(intf=>{const override=node.interfaceLabelGaps?.[intf.id]??node.interfaceSignalGaps?.[intf.id],value=override??defaults.gap;return `<div class="interface-gap-row"><span title="${escapeHtml(intf.name)}">${escapeHtml(intf.name)} · ${intf.pins.length}P</span><input type="range" min="0" max="24" step="1" value="${value}" data-interface="${intf.id}" aria-label="${escapeHtml(intf.name)} 信号标签间距"><output>${value}</output><button type="button" class="interface-gap-reset" data-reset-interface="${intf.id}" title="恢复全局 ${defaults.gap}" ${override==null?'disabled':''}>↺</button></div>`;}).join('')||'<div class="compact-empty">此板卡没有接口</div>';
+      $('#nodeInterfaceGaps').innerHTML=board.interfaces.map(intf=>{const override=node.interfaceLabelGaps?.[intf.id],value=override??defaults.gap;return `<div class="interface-gap-row"><span title="${escapeHtml(intf.name)}">${escapeHtml(intf.name)} · ${intf.pins.length}P</span><input type="range" min="0" max="24" step="1" value="${value}" data-interface="${intf.id}" aria-label="${escapeHtml(intf.name)} 信号标签间距"><output>${value}</output><button type="button" class="interface-gap-reset" data-reset-interface="${intf.id}" title="恢复全局 ${defaults.gap}" ${override==null?'disabled':''}>↺</button></div>`;}).join('')||'<div class="compact-empty">此板卡没有接口</div>';
     }
     if(textItem){
       const style=freeTextStyle(textItem);
       $('#assemblyTextContent').value=textItem.text||'';
       $('#assemblyTextFontSize').value=style.fontSize;$('#assemblyTextFontSizeValue').value=style.fontSize;
       $('#assemblyTextFontFamily').value=style.fontFamily;$('#assemblyTextColor').value=style.color;
+      populateTextStyleControls('assemblyText',style);
       $('#resetAssemblyTextStyleBtn').disabled=!textItem.style;
     }
     if(hasPort){
@@ -1435,7 +1456,7 @@
       const targetIf=state.boards.find(board=>board.id===targetNode?.boardId)?.interfaces.find(intf=>intf.id===interfaceId);
       const count=Math.min(sourceIf?.pins.length||0,targetIf?.pins.length||0);
       const pinMap=Array.from({length:count},(_,index)=>({from:index+1,to:index+1}));
-      state.assembly.connections.push({id:uid('wire'),mode:'bundle',from:{...pendingPort},to:endpoint,pinMap});saveState();
+      state.assembly.connections.push({id:uid('wire'),mode:'bundle',description:'',from:{...pendingPort},to:endpoint,pinMap});saveState();
       toast(sourceIf?.pins.length===targetIf?.pins.length?'线束连接已创建':'线束连接已创建；两端针脚数量不一致');
     }
     pendingPort=null;renderAssembly();
@@ -1456,7 +1477,7 @@
     if(existing){
       if(sameEndpoint(existing.from,pendingPort))existing.pinMap.push({from:pendingPort.pin,to:pin});
       else existing.pinMap.push({from:pin,to:pendingPort.pin});
-    }else state.assembly.connections.push({id:uid('wire'),mode:'signal',from:{nodeId:pendingPort.nodeId,interfaceId:pendingPort.interfaceId},to:{nodeId:target.nodeId,interfaceId:target.interfaceId},pinMap:[{from:pendingPort.pin,to:pin}]});
+    }else state.assembly.connections.push({id:uid('wire'),mode:'signal',description:'',from:{nodeId:pendingPort.nodeId,interfaceId:pendingPort.interfaceId},to:{nodeId:target.nodeId,interfaceId:target.interfaceId},pinMap:[{from:pendingPort.pin,to:pin}]});
     pendingPort=null;saveState();toast('单信号线连接已创建');renderAssembly();
   }
 
@@ -1549,13 +1570,15 @@
 
   function textVisualBounds(text,x,y,style,anchor='start') {
     const lines=String(text||'').split('\n'),longest=Math.max(1,...lines.map(line=>[...line].length)),width=Math.max(style.fontSize,longest*style.fontSize*.62),height=Math.max(style.fontSize,lines.length*style.fontSize*1.25);
-    return {left:anchor==='middle'?x-width/2:x,top:y,right:anchor==='middle'?x+width/2:x+width,bottom:y+height};
+    const shadowPad=style.shadow.enabled?style.shadow.blur:0,shadowX=style.shadow.enabled?style.shadow.offsetX:0,shadowY=style.shadow.enabled?style.shadow.offsetY:0,left=anchor==='middle'?x-width/2:x,right=anchor==='middle'?x+width/2:x+width;
+    return {left:Math.min(left,left+shadowX-shadowPad),top:Math.min(y,y+shadowY-shadowPad),right:Math.max(right,right+shadowX+shadowPad),bottom:Math.max(y+height,y+height+shadowY+shadowPad)};
   }
 
-  function positionedTextSvg(text,x,y,style,{anchor='start',weight=500,outline=false}={}) {
+  function positionedTextSvg(text,x,y,style,{anchor='start',outline=false}={}) {
     const lines=String(text||'').split('\n'),family=escapeXml(textFontCss(style)),stroke=outline?' stroke="#fff" stroke-width="4" stroke-linejoin="round" paint-order="stroke"':'';
     const tspans=lines.map((line,index)=>`<tspan x="${x}" dy="${index?style.fontSize*1.25:0}">${escapeXml(line||' ')}</tspan>`).join('');
-    return `<text x="${x}" y="${y}" text-anchor="${anchor}" dominant-baseline="hanging" font-family="${family}" font-size="${style.fontSize}" font-weight="${weight}" fill="${style.color}"${stroke}>${tspans}</text>`;
+    const shadow=style.shadow.enabled?` style="filter:drop-shadow(${style.shadow.offsetX}px ${style.shadow.offsetY}px ${style.shadow.blur}px ${style.shadow.color})"`:'';
+    return `<text x="${x}" y="${y}" text-anchor="${anchor}" dominant-baseline="hanging" font-family="${family}" font-size="${style.fontSize}" font-weight="${style.fontWeight}" fill="${style.color}"${stroke}${shadow}>${tspans}</text>`;
   }
 
   function buildAssemblySvg() {
@@ -1605,18 +1628,26 @@
     const nodeNameMarkup=nodes.map(node=>{
       const board=state.boards.find(b=>b.id===node.boardId);if(!board||!nodeNameVisible(node))return '';
       const geometry=getBoardImageGeometry(board,node),offset=nodeNameOffset(board,node),x=node.x+geometry.centerX+offset.x,y=node.y+geometry.centerY+offset.y;
-      const style=nodeNameStyle(node);return positionedTextSvg(node.label,x,y-style.fontSize/2,style,{anchor:'middle',weight:800,outline:true});
+      const style=nodeNameStyle(node);return positionedTextSvg(node.label,x,y-style.fontSize/2,style,{anchor:'middle',outline:true});
     }).join('');
     const freeTextMarkup=assemblyTexts().map(item=>positionedTextSvg(item.text,item.x,item.y,freeTextStyle(item))).join('');
 
     return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><defs><filter id="shadow" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="5" stdDeviation="5" flood-color="#263951" flood-opacity=".16"/></filter></defs><rect width="100%" height="100%" fill="#fff"/><g transform="translate(${tx} ${ty})"><g>${nodeMarkup}</g><g>${wires}</g><g>${nodeNameMarkup}${freeTextMarkup}</g></g></svg>`;
   }
 
+  function isAssemblyDocument(documentData) {
+    const validShadow=shadow=>shadow&&typeof shadow.enabled==='boolean'&&/^#[0-9a-f]{6}$/i.test(shadow.color||'')&&Number.isFinite(Number(shadow.blur))&&Number.isFinite(Number(shadow.offsetX))&&Number.isFinite(Number(shadow.offsetY));
+    const validStyle=style=>style&&Number.isFinite(Number(style.fontSize))&&FONT_FAMILIES[style.fontFamily]&&/^#[0-9a-f]{6}$/i.test(style.color||'')&&(style.fontWeight==null||COMPATIBLE_FONT_WEIGHTS.includes(Number(style.fontWeight)))&&(style.shadow==null||validShadow(style.shadow));
+    const validNode=node=>node&&typeof node.id==='string'&&typeof node.boardId==='string'&&typeof node.label==='string'&&Number.isFinite(Number(node.x))&&Number.isFinite(Number(node.y))&&(node.rotation==null||[0,90,180,270].includes(node.rotation))&&(node.flipX==null||typeof node.flipX==='boolean')&&(node.scale==null||Number.isFinite(Number(node.scale)))&&(node.fixed==null||typeof node.fixed==='boolean')&&(node.showName==null||typeof node.showName==='boolean');
+    const validConnection=connection=>connection&&typeof connection.id==='string'&&(connection.mode==null||['bundle','signal'].includes(connection.mode))&&typeof connection.description==='string'&&connection.from&&connection.to&&Array.isArray(connection.pinMap);
+    const validText=item=>item&&typeof item.id==='string'&&typeof item.text==='string'&&Number.isFinite(Number(item.x))&&Number.isFinite(Number(item.y))&&(!item.style||validStyle(item.style));
+    return documentData?.schema===ASSEMBLY_SCHEMA_ID&&documentData?.schemaVersion==='1.6.0'&&documentData?.kind==='wiresketch/assembly'&&documentData?.version===1&&typeof documentData.id==='string'&&typeof documentData.name==='string'&&documentData.layout&&Array.isArray(documentData.nodes)&&documentData.nodes.every(validNode)&&Array.isArray(documentData.connections)&&documentData.connections.every(validConnection)&&(documentData.textDefaults==null||validStyle(documentData.textDefaults))&&(documentData.texts==null||Array.isArray(documentData.texts)&&documentData.texts.every(validText))&&Array.isArray(documentData.embeddedBoards);
+  }
+
   function renderAssemblyDocumentSvg(documentData) {
-    if(documentData?.kind!=='wiresketch/assembly'||!Array.isArray(documentData.nodes))throw new Error('Invalid WireSketch assembly');
+    if(!isAssemblyDocument(documentData))throw new Error('WireSketch assembly schemaVersion 1.6.0 required');
     const previousState=state;
     state={boards:(documentData.embeddedBoards||[]).map(board=>({...board,builtIn:false})),assembly:{...documentData,embeddedBoards:undefined}};
-    migrateAssemblyTextModel(state.assembly);
     state.boards.forEach(board=>{if(board.source==='generated')refreshGeneratedBoard(board);});
     try{return buildAssemblySvg();}finally{state=previousState;}
   }
@@ -1668,14 +1699,14 @@
   }
 
   async function importAssembly(file) {
-    const [doc]=await readJsonFiles([file]); if(doc?.kind!=='wiresketch/assembly'||!Array.isArray(doc.nodes))return toast('不是有效的装配体描述文件');
+    const [doc]=await readJsonFiles([file]); if(!isAssemblyDocument(doc))return toast('仅支持装配体格式 1.6.0');
     loadAssemblyDocument(doc);
   }
 
   function loadAssemblyDocument(doc) {
-    if(doc?.kind!=='wiresketch/assembly'||!Array.isArray(doc.nodes))return false;
+    if(!isAssemblyDocument(doc))return false;
     (doc.embeddedBoards||[]).forEach(board=>{if(!state.boards.some(b=>b.id===board.id)){board.builtIn=false;if(board.source==='generated')refreshGeneratedBoard(board);state.boards.push(board);}});
-    state.assembly={...doc,embeddedBoards:undefined};migrateAssemblyTextModel(state.assembly);selectedItemKeys.clear();selectedNodeId=null;selectedWireId=null;selectedWirePinKey=null;selectedPort=null;selectedTextId=null;pendingPort=null;saveState();renderComponentList();renderAssembly();toast('装配体已打开');
+    state.assembly={...doc,embeddedBoards:undefined};selectedItemKeys.clear();selectedNodeId=null;selectedWireId=null;selectedWirePinKey=null;selectedPort=null;selectedTextId=null;pendingPort=null;saveState();renderComponentList();renderAssembly();toast('装配体已打开');
     return true;
   }
 
@@ -1744,26 +1775,29 @@
     $('#canvasHeight').oninput=e=>{const size=assemblyCanvasSize();state.assembly.canvasSize={...size,height:+e.target.value};$('#canvasHeightValue').value=e.target.value;saveState();renderAssembly();};
     $('#defaultShowFromLabels').onchange=e=>{updateAssemblyWireDefaults({showFromLabels:e.target.checked});saveState();renderAssemblyProperties();renderWires();};
     $('#defaultShowToLabels').onchange=e=>{updateAssemblyWireDefaults({showToLabels:e.target.checked});saveState();renderAssemblyProperties();renderWires();};
-    const updateTextDefaults=(property,value)=>{state.assembly.textDefaults={...assemblyTextDefaults(),[property]:value};saveState();renderAssembly();};
+    const updateTextDefaults=(property,value)=>{state.assembly.textDefaults=withTextStyleChange(assemblyTextDefaults(),property,value);saveState();renderAssembly();};
     $('#defaultTextFontSize').oninput=e=>updateTextDefaults('fontSize',Number(e.target.value));
     $('#defaultTextFontFamily').onchange=e=>updateTextDefaults('fontFamily',e.target.value);
     $('#defaultTextColor').oninput=e=>updateTextDefaults('color',e.target.value);
-    $('#nodeInterfaceGaps').oninput=e=>{const input=e.target.closest('input[data-interface]'),node=state.assembly.nodes.find(item=>item.id===selectedNodeId);if(!input||!node)return;node.interfaceLabelGaps=node.interfaceLabelGaps||{};node.interfaceLabelGaps[input.dataset.interface]=Math.max(0,Math.min(24,Number(input.value)||0));delete node.interfaceSignalGaps;const output=input.nextElementSibling;if(output)output.value=input.value;const reset=input.parentElement.querySelector('.interface-gap-reset');if(reset)reset.disabled=false;saveState();renderWires();};
-    $('#nodeInterfaceGaps').onclick=e=>{const button=e.target.closest('[data-reset-interface]'),node=state.assembly.nodes.find(item=>item.id===selectedNodeId);if(!button||!node)return;delete node.interfaceLabelGaps?.[button.dataset.resetInterface];delete node.interfaceSignalGaps?.[button.dataset.resetInterface];if(node.interfaceLabelGaps&&!Object.keys(node.interfaceLabelGaps).length)delete node.interfaceLabelGaps;if(node.interfaceSignalGaps&&!Object.keys(node.interfaceSignalGaps).length)delete node.interfaceSignalGaps;saveState();renderAssemblyProperties();renderWires();};
-    $('#resetNodeGapsBtn').onclick=()=>{const node=state.assembly.nodes.find(item=>item.id===selectedNodeId);if(!node)return;delete node.interfaceLabelGaps;delete node.interfaceSignalGaps;saveState();renderAssemblyProperties();renderWires();};
+    bindExtendedTextStyleControls('defaultText',updateTextDefaults);
+    $('#nodeInterfaceGaps').oninput=e=>{const input=e.target.closest('input[data-interface]'),node=state.assembly.nodes.find(item=>item.id===selectedNodeId);if(!input||!node)return;node.interfaceLabelGaps=node.interfaceLabelGaps||{};node.interfaceLabelGaps[input.dataset.interface]=Math.max(0,Math.min(24,Number(input.value)||0));const output=input.nextElementSibling;if(output)output.value=input.value;const reset=input.parentElement.querySelector('.interface-gap-reset');if(reset)reset.disabled=false;saveState();renderWires();};
+    $('#nodeInterfaceGaps').onclick=e=>{const button=e.target.closest('[data-reset-interface]'),node=state.assembly.nodes.find(item=>item.id===selectedNodeId);if(!button||!node)return;delete node.interfaceLabelGaps?.[button.dataset.resetInterface];if(node.interfaceLabelGaps&&!Object.keys(node.interfaceLabelGaps).length)delete node.interfaceLabelGaps;saveState();renderAssemblyProperties();renderWires();};
+    $('#resetNodeGapsBtn').onclick=()=>{const node=state.assembly.nodes.find(item=>item.id===selectedNodeId);if(!node)return;delete node.interfaceLabelGaps;saveState();renderAssemblyProperties();renderWires();};
     $('#nodeFixed').onchange=e=>{const node=state.assembly.nodes.find(item=>item.id===selectedNodeId);if(!node)return;node.fixed=e.target.checked;saveState();renderAssembly();toast(node.fixed?'板卡位置已固定':'板卡位置已解除固定');};
     $('#nodeShowName').onchange=e=>{const node=state.assembly.nodes.find(item=>item.id===selectedNodeId);if(!node)return;node.showName=e.target.checked;saveState();renderAssembly();};
-    const updateNodeNameStyle=(property,value)=>{const node=state.assembly.nodes.find(item=>item.id===selectedNodeId);if(!node)return;node.nameStyle={...nodeNameStyle(node),[property]:value};saveState();renderAssembly();};
+    const updateNodeNameStyle=(property,value)=>{const node=state.assembly.nodes.find(item=>item.id===selectedNodeId);if(!node)return;node.nameStyle=withTextStyleChange(nodeNameStyle(node),property,value);saveState();renderAssembly();};
     $('#nodeNameFontSize').oninput=e=>updateNodeNameStyle('fontSize',Number(e.target.value));
     $('#nodeNameFontFamily').onchange=e=>updateNodeNameStyle('fontFamily',e.target.value);
     $('#nodeNameColor').oninput=e=>updateNodeNameStyle('color',e.target.value);
+    bindExtendedTextStyleControls('nodeName',updateNodeNameStyle);
     $('#resetNodeNameStyleBtn').onclick=()=>{const node=state.assembly.nodes.find(item=>item.id===selectedNodeId);if(!node)return;delete node.nameStyle;saveState();renderAssembly();};
     $('#resetNodeNamePositionBtn').onclick=()=>{const node=state.assembly.nodes.find(item=>item.id===selectedNodeId);if(!node)return;delete node.nameOffset;saveState();renderAssembly();};
-    const updateFreeText=(property,value)=>{const item=assemblyTexts().find(entry=>entry.id===selectedTextId);if(!item)return;if(property==='text')item.text=value;else item.style={...freeTextStyle(item),[property]:value};saveState();renderAssembly();};
+    const updateFreeText=(property,value)=>{const item=assemblyTexts().find(entry=>entry.id===selectedTextId);if(!item)return;if(property==='text')item.text=value;else item.style=withTextStyleChange(freeTextStyle(item),property,value);saveState();renderAssembly();};
     $('#assemblyTextContent').oninput=e=>updateFreeText('text',e.target.value);
     $('#assemblyTextFontSize').oninput=e=>updateFreeText('fontSize',Number(e.target.value));
     $('#assemblyTextFontFamily').onchange=e=>updateFreeText('fontFamily',e.target.value);
     $('#assemblyTextColor').oninput=e=>updateFreeText('color',e.target.value);
+    bindExtendedTextStyleControls('assemblyText',updateFreeText);
     $('#resetAssemblyTextStyleBtn').onclick=()=>{const item=assemblyTexts().find(entry=>entry.id===selectedTextId);if(!item)return;delete item.style;saveState();renderAssembly();};
     $('#deleteAssemblyTextBtn').onclick=deleteSelectedText;
     $('#portSingleSignalMode').onchange=e=>{const node=state.assembly.nodes.find(item=>item.id===selectedPort?.nodeId);if(!node||!selectedPort)return;const conflicting=state.assembly.connections.some(connection=>connectionMode(connection)===(e.target.checked?'bundle':'signal')&&(sameEndpoint(connection.from,selectedPort)||sameEndpoint(connection.to,selectedPort)));if(conflicting){e.target.checked=!e.target.checked;toast(e.target.checked?'请先删除该端口的单信号线连接':'请先删除该端口的整束连接');return;}node.interfaceConnectionModes=node.interfaceConnectionModes||{};if(e.target.checked)node.interfaceConnectionModes[selectedPort.interfaceId]='signal';else delete node.interfaceConnectionModes[selectedPort.interfaceId];if(!Object.keys(node.interfaceConnectionModes).length)delete node.interfaceConnectionModes;if(sameEndpoint(pendingPort,selectedPort))pendingPort=null;saveState();renderAssembly();toast(e.target.checked?'已开启单信号线连接模式':'已恢复整束连接模式');};

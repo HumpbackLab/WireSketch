@@ -233,7 +233,7 @@ main, .workspace { height: calc(100vh - 68px); }
 .node-remove:hover { color: #d34d4d; background: #fff0f0; }
 .node-body { position: absolute; inset: 0; }
 .node-body img { position: absolute; object-fit: fill; filter: drop-shadow(0 4px 5px rgba(27,38,54,.2)); pointer-events: none; }
-.node-name-label { position: absolute; z-index: 10; max-width: 260px; padding: 3px 7px; transform: translate(-50%,-50%); overflow: hidden; border: 1px solid transparent; border-radius: 5px; background: rgba(255,255,255,.88); font-weight: 800; line-height: 1.2; text-overflow: ellipsis; text-shadow: 0 1px 0 white; white-space: nowrap; cursor: move; touch-action: none; }
+.node-name-label { position: absolute; z-index: 10; max-width: 260px; padding: 3px 7px; transform: translate(-50%,-50%); overflow: visible; border: 1px solid transparent; border-radius: 5px; background: rgba(255,255,255,.88); line-height: 1.25; white-space: nowrap; cursor: move; touch-action: none; }
 .node-name-label:hover, .node-name-label.selected { border-color: #8facf0; box-shadow: 0 2px 8px rgba(39,100,231,.18); }
 .assembly-text-element { position: absolute; z-index: 12; min-width: 16px; max-width: 560px; padding: 0; overflow: visible; border: 0; border-radius: 3px; outline: 1px solid transparent; color: #25334a; background: transparent; line-height: 1.25; text-align: left; white-space: pre-wrap; cursor: move; touch-action: none; }
 .assembly-text-element:hover, .assembly-text-element.selected { outline-color: #8facf0; background: rgba(255,255,255,.72); box-shadow: 0 2px 8px rgba(39,100,231,.16); }

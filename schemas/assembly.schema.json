@@ -8,7 +8,7 @@
   "required": ["schema", "schemaVersion", "kind", "version", "id", "name", "layout", "nodes", "connections", "embeddedBoards"],
   "properties": {
     "schema": { "const": "urn:wiresketch:schema:assembly:1.0", "description": "Stable format identifier. Never translate or modify it." },
-    "schemaVersion": { "enum": ["1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0", "1.6.0"], "description": "1.6.0 treats the diagram title as free text and adds inherited defaults for all editable text." },
+    "schemaVersion": { "const": "1.6.0", "description": "The only supported assembly format version." },
     "kind": { "const": "wiresketch/assembly" },
     "version": { "const": 1 },
     "id": { "$ref": "#/$defs/id" },
@@ -16,7 +16,6 @@
     "description": { "type": "string", "default": "" },
     "layout": { "$ref": "#/$defs/layout" },
     "canvasSize": { "$ref": "#/$defs/canvasSize" },
-    "title": { "$ref": "#/$defs/title", "deprecated": true, "description": "Legacy 1.5 title configuration; 1.6 importers migrate it into texts[]." },
     "textDefaults": { "$ref": "#/$defs/textStyle" },
     "texts": { "type": "array", "items": { "$ref": "#/$defs/freeText" }, "default": [] },
     "wireDefaults": { "$ref": "#/$defs/wireDefaults" },
@@ -69,7 +68,7 @@
         "label": { "type": "string", "minLength": 1, "maxLength": 120, "description": "Instance label; it may differ from the board definition name." },
         "x": { "type": "number", "description": "Left coordinate in diagram-px." },
         "y": { "type": "number", "description": "Top coordinate in diagram-px." },
-        "rotation": { "type": "integer", "enum": [0, 90, 180, 270], "default": 0, "description": "Clockwise rotation of this PCB instance. Omitted values are treated as 0 for backward compatibility." },
+        "rotation": { "type": "integer", "enum": [0, 90, 180, 270], "default": 0, "description": "Clockwise rotation of this PCB instance." },
         "flipX": { "type": "boolean", "default": false, "description": "Mirrors this PCB instance horizontally in its local, unrotated coordinate system." },
         "scale": { "type": "number", "minimum": 0.5, "maximum": 2, "default": 1, "description": "Visual scale of this PCB instance. Image, interfaces, pins, routing anchors, and export output scale together." },
         "fixed": { "type": "boolean", "default": false, "description": "Prevents this board instance from being dragged or moved by automatic layout." },
@@ -105,18 +104,21 @@
       "properties": {
         "fontSize": { "type": "number", "minimum": 8, "maximum": 72 },
         "fontFamily": { "enum": ["sans-serif", "serif", "monospace", "Arial", "Helvetica", "Verdana", "Tahoma", "Georgia", "TimesNewRoman", "CourierNew", "MicrosoftYaHei", "PingFangSC", "NotoSansSC", "SimHei", "SimSun", "KaiTi", "FangSong"] },
-        "color": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$" }
+        "fontWeight": { "enum": [300, 400, 500, 600, 700, 800, 900], "default": 500 },
+        "color": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$" },
+        "shadow": { "$ref": "#/$defs/textShadow" }
       }
     },
-    "title": {
+    "textShadow": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["x", "y", "showInExport", "style"],
+      "required": ["enabled", "color", "blur", "offsetX", "offsetY"],
       "properties": {
-        "x": { "type": "number" },
-        "y": { "type": "number" },
-        "showInExport": { "type": "boolean", "default": true },
-        "style": { "$ref": "#/$defs/textStyle" }
+        "enabled": { "type": "boolean" },
+        "color": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$" },
+        "blur": { "type": "number", "minimum": 0, "maximum": 12 },
+        "offsetX": { "type": "number", "minimum": -10, "maximum": 10 },
+        "offsetY": { "type": "number", "minimum": -10, "maximum": 10 }
       }
     },
     "freeText": {
@@ -125,7 +127,7 @@
       "required": ["id", "text", "x", "y"],
       "properties": {
         "id": { "$ref": "#/$defs/id" },
-        "role": { "enum": ["title"], "description": "Optional migration hint; title text otherwise behaves exactly like free text." },
+        "role": { "enum": ["title"], "description": "Optional semantic label; title text behaves exactly like other free text." },
         "text": { "type": "string", "maxLength": 500 },
         "x": { "type": "number" },
         "y": { "type": "number" },
@@ -156,11 +158,10 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "width": { "type": "number", "minimum": 1, "maximum": 8, "default": 2.2 },
-        "labelGap": { "type": "number", "minimum": 0, "maximum": 24, "default": 6, "description": "Default spacing added between adjacent signal-name labels; wire paths are unaffected." },
-        "gap": { "type": "number", "minimum": 0, "maximum": 24, "deprecated": true, "description": "Backward-compatible alias for labelGap." },
+        "width": { "type": "number", "minimum": 1, "maximum": 8, "default": 1.5 },
+        "labelGap": { "type": "number", "minimum": 0, "maximum": 24, "default": 0, "description": "Default spacing added between adjacent signal-name labels; wire paths are unaffected." },
         "routeGap": { "type": "number", "minimum": 0, "maximum": 20, "default": 6, "description": "Default spacing between routed signal wires in the same connection bundle. Zero allows coincident routes." },
-        "cornerRadius": { "type": "number", "minimum": 0, "maximum": 24, "default": 0, "description": "Default radius for rounded polyline corners. Zero preserves sharp corners." },
+        "cornerRadius": { "type": "number", "minimum": 0, "maximum": 24, "default": 6, "description": "Default radius for rounded polyline corners. Zero preserves sharp corners." },
         "showFromLabels": { "type": "boolean", "default": true },
         "showToLabels": { "type": "boolean", "default": true }
       }

@@ -207,7 +207,7 @@ Pin 3 → Pin 3
 - [PCB 示例](examples/ai-board.pcb.json)
 - [装配体示例](examples/ai-assembly.assembly.json)
 
-程序仍兼容早期没有 Schema 标识，或缺少接口方向、节点旋转、翻转、缩放、名称位置及连接模式字段的描述文件。旧连接默认按整条线束处理，旧节点默认显示名称。
+装配体导入和离线渲染仅接受 `schemaVersion: "1.6.0"`，不会迁移旧版装配体。
 
 ## 离线渲染装配体
 
