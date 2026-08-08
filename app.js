@@ -61,8 +61,11 @@
   let drawStart = null;
   let interfaceDragState = null;
   let dragState = null;
+  let nameDragState = null;
   let ignoreCanvasClickUntil = 0;
   let transparentColorPicking = false;
+  let imageRotationPreview = 0;
+  let imageRotationBusy = false;
   const transparentImageCache = new Map();
   const transparentImageJobs = new Map();
 
@@ -177,6 +180,13 @@
   }
   function nodeFlipX(node) { return node?.flipX===true; }
   function nodeFixed(node) { return node?.fixed===true; }
+  function nodeNameVisible(node) { return node?.showName!==false; }
+  function nodeNameOffset(board,node) {
+    const configured=node?.nameOffset;
+    if(configured&&Number.isFinite(Number(configured.x))&&Number.isFinite(Number(configured.y)))return {x:Number(configured.x),y:Number(configured.y)};
+    const bounds=getBoardImageGeometry(board,node).bounds;
+    return {x:0,y:bounds.height/2+18};
+  }
   function interfaceSingleSignalMode(node,interfaceId) { return node?.interfaceConnectionModes?.[interfaceId]==='signal'; }
   function connectionMode(connection) { return connection?.mode==='signal'?'signal':'bundle'; }
   function nodeScale(node) {
@@ -250,6 +260,7 @@
   function renderBoardEditor() {
     const board = currentBoard();
     if (!board) return;
+    if(!imageRotationBusy)syncImageRotationControls(board);
     $('#boardName').value = board.name;
     $('#boardBreadcrumb').textContent = board.name;
     const generated=board.source==='generated';
@@ -322,6 +333,81 @@
     const board=currentBoard();if(!board)return;
     delete board.backgroundTransparency;transparentImageCache.delete(board.id);setTransparentColorPicking(false);saveState();
     renderBoardEditor();renderBoardList();renderComponentList();if($('#assemblyView').classList.contains('active'))renderAssembly();toast('已恢复图片背景');
+  }
+
+  function rotatedCanvasSize(width,height,radians) {
+    const cosine=Math.abs(Math.cos(radians)),sine=Math.abs(Math.sin(radians));
+    return {width:Math.max(1,Math.ceil(width*cosine+height*sine)),height:Math.max(1,Math.ceil(width*sine+height*cosine))};
+  }
+
+  function normalizedImageRotation(value) {
+    const angle=Math.max(-180,Math.min(180,Number(value)||0));
+    return Math.round(angle*10)/10;
+  }
+
+  function rotationDelta(from,to) {
+    let delta=to-from;
+    while(delta>180)delta-=360;
+    while(delta<-180)delta+=360;
+    return delta;
+  }
+
+  function previewImportedImageRotation(targetDegrees) {
+    const current=normalizedImageRotation(currentBoard()?.imageRotation),target=normalizedImageRotation(targetDegrees);
+    imageRotationPreview=rotationDelta(current,target);
+    const transform=imageRotationPreview?`rotate(${imageRotationPreview}deg)`:'';
+    $('#boardImage').style.transform=transform;$('#interfaceOverlay').style.transform=transform;
+    $('#boardImage').style.transformOrigin='center';$('#interfaceOverlay').style.transformOrigin='center';
+    $('#imageStage').classList.toggle('image-rotation-preview',!!imageRotationPreview);
+  }
+
+  function syncImageRotationControls(board=currentBoard()) {
+    const angle=board?.source==='image'?normalizedImageRotation(board.imageRotation):0;
+    imageRotationPreview=0;$('#imageRotationAngle').value=angle;$('#imageRotationSlider').value=angle;
+    $('#imageRotationSlider').disabled=false;$('#imageRotationAngle').disabled=false;
+    $('#boardImage').style.transform='';$('#interfaceOverlay').style.transform='';$('#imageStage').classList.remove('image-rotation-preview');
+  }
+
+  function rotateInterfaceRects(board,oldWidth,oldHeight,newWidth,newHeight,radians,rotatedCenterX=newWidth/2,rotatedCenterY=newHeight/2) {
+    const cosine=Math.cos(radians),sine=Math.sin(radians),oldCenter={x:oldWidth/2,y:oldHeight/2},newCenter={x:rotatedCenterX,y:rotatedCenterY};
+    const rotate=(x,y)=>{const dx=x-oldCenter.x,dy=y-oldCenter.y;return {x:newCenter.x+dx*cosine-dy*sine,y:newCenter.y+dx*sine+dy*cosine};};
+    board.interfaces.forEach(intf=>{
+      const left=intf.rect.x*oldWidth,top=intf.rect.y*oldHeight,right=(intf.rect.x+intf.rect.w)*oldWidth,bottom=(intf.rect.y+intf.rect.h)*oldHeight;
+      const points=[rotate(left,top),rotate(right,top),rotate(right,bottom),rotate(left,bottom)],xs=points.map(point=>point.x),ys=points.map(point=>point.y);
+      const minX=Math.max(0,Math.min(...xs)),minY=Math.max(0,Math.min(...ys)),maxX=Math.min(newWidth,Math.max(...xs)),maxY=Math.min(newHeight,Math.max(...ys));
+      intf.rect={x:minX/newWidth,y:minY/newHeight,w:(maxX-minX)/newWidth,h:(maxY-minY)/newHeight};
+      const quarterTurns=Math.round((radians*180/Math.PI)/90);
+      if(Math.abs(radians*180/Math.PI-quarterTurns*90)<.001)intf.rotation=(interfaceRotation(intf)+quarterTurns*90+360)%360;
+    });
+  }
+
+  function trimTransparentCanvas(canvas) {
+    const context=canvas.getContext('2d',{willReadFrequently:true}),data=context.getImageData(0,0,canvas.width,canvas.height).data;
+    let left=canvas.width,top=canvas.height,right=-1,bottom=-1;
+    for(let y=0;y<canvas.height;y++)for(let x=0;x<canvas.width;x++){if(data[(y*canvas.width+x)*4+3]){left=Math.min(left,x);top=Math.min(top,y);right=Math.max(right,x);bottom=Math.max(bottom,y);}}
+    if(right<left)return {canvas,left:0,top:0};
+    const width=right-left+1,height=bottom-top+1;if(!left&&!top&&width===canvas.width&&height===canvas.height)return {canvas,left:0,top:0};
+    const trimmed=document.createElement('canvas');trimmed.width=width;trimmed.height=height;trimmed.getContext('2d').drawImage(canvas,left,top,width,height,0,0,width,height);
+    return {canvas:trimmed,left,top};
+  }
+
+  async function rotateImportedImage(requestedDegrees) {
+    const board=currentBoard(),target=normalizedImageRotation(requestedDegrees??$('#imageRotationAngle').value),current=normalizedImageRotation(board?.imageRotation),degrees=rotationDelta(current,target);
+    if(imageRotationBusy||!board?.image||board.source!=='image')return;if(!degrees){syncImageRotationControls(board);return;}
+    imageRotationBusy=true;$('#imageRotationSlider').disabled=true;$('#imageRotationAngle').disabled=true;setTransparentColorPicking(false);
+    $('#boardImage').style.transform='';$('#interfaceOverlay').style.transform='';$('#imageStage').classList.remove('image-rotation-preview');imageRotationPreview=0;
+    try {
+      const image=await loadImageSource(board.image),radians=degrees*Math.PI/180,size=rotatedCanvasSize(image.naturalWidth,image.naturalHeight,radians);
+      if(size.width>12000||size.height>12000||size.width*size.height>64000000)throw new RangeError('旋转后的图片尺寸过大');
+      const canvas=document.createElement('canvas');canvas.width=size.width;canvas.height=size.height;
+      const context=canvas.getContext('2d');context.imageSmoothingEnabled=true;context.imageSmoothingQuality='high';context.translate(size.width/2,size.height/2);context.rotate(radians);context.drawImage(image,-image.naturalWidth/2,-image.naturalHeight/2);
+      const trimmed=trimTransparentCanvas(canvas),output=trimmed.canvas;
+      rotateInterfaceRects(board,image.naturalWidth,image.naturalHeight,output.width,output.height,radians,size.width/2-trimmed.left,size.height/2-trimmed.top);
+      board.image=output.toDataURL('image/png');board.imageSize={width:output.width,height:output.height};board.imageRotation=target;transparentImageCache.delete(board.id);boardZoom=null;
+      await ensureTransparentBoardImage(board);saveState();renderBoardEditor();renderBoardList();renderComponentList();if($('#assemblyView').classList.contains('active'))renderAssembly();
+      toast(`图片角度 ${target}°`);
+    } catch(error) {console.error(error);toast(error instanceof RangeError?error.message:'图片旋转失败，请检查图片格式');}
+    finally {imageRotationBusy=false;syncImageRotationControls(board);}
   }
 
   function syncOverlay() {
@@ -459,6 +545,7 @@
 
   function handleImage(file) {
     if (!file?.type.startsWith('image/')) return toast('请选择图片文件');
+    syncImageRotationControls();
     const targetBoard=currentBoard();
     const reader = new FileReader();
     reader.onload = () => {
@@ -469,6 +556,7 @@
         targetBoard.image = dataUrl;
         targetBoard.imageSize = {width:probe.naturalWidth, height:probe.naturalHeight};
         targetBoard.source='image';
+        delete targetBoard.imageRotation;
         delete targetBoard.backgroundTransparency;
         transparentImageCache.delete(targetBoard.id);
         delete targetBoard.generated;
@@ -481,6 +569,7 @@
   }
 
   function onStagePointerDown(e) {
+    if(imageRotationPreview)return;
     if(transparentColorPicking){e.preventDefault();pickTransparentColor(e);return;}
     if (e.button !== 0 || !currentBoard()?.image || e.target.closest('.interface-box')) return;
     const overlay = $('#interfaceOverlay'), r = overlay.getBoundingClientRect();
@@ -545,6 +634,7 @@
       image:board.image||null,
       imageSize:{width:board.imageSize?.width||420,height:board.imageSize?.height||260,unit:'px'},
       source:board.source||'image',
+      ...(board.source==='image'&&normalizedImageRotation(board.imageRotation)?{imageRotation:normalizedImageRotation(board.imageRotation)}:{}),
       ...(board.source==='image'&&board.backgroundTransparency?{backgroundTransparency:structuredClone(board.backgroundTransparency)}:{}),
       ...(board.source==='generated'?{generated:structuredClone(board.generated)}:{}),
       interfaces:board.interfaces.map((intf,index)=>({
@@ -564,7 +654,7 @@
     const wireDefaults=assemblyWireDefaults();
     return {
       schema:ASSEMBLY_SCHEMA_ID,
-      schemaVersion:'1.3.0',
+      schemaVersion:'1.4.0',
       kind:'wiresketch/assembly',
       version:1,
       id:state.assembly.id,
@@ -573,7 +663,7 @@
       layout:{origin:'top-left',axisX:'right',axisY:'down',unit:'diagram-px',routing:'hybrid'},
       canvasSize:assemblyCanvasSize(),
       wireDefaults:{width:wireDefaults.width,labelGap:wireDefaults.gap,routeGap:wireDefaults.routeGap,cornerRadius:wireDefaults.cornerRadius,showFromLabels:wireDefaults.showFromLabels,showToLabels:wireDefaults.showToLabels},
-      nodes:state.assembly.nodes.map(node=>{const labelGaps=node.interfaceLabelGaps||node.interfaceSignalGaps,modes=node.interfaceConnectionModes;return {id:node.id,boardId:node.boardId,label:node.label,x:node.x,y:node.y,rotation:nodeRotation(node),flipX:nodeFlipX(node),scale:nodeScale(node),fixed:nodeFixed(node),...(labelGaps?{interfaceLabelGaps:{...labelGaps}}:{}),...(modes&&Object.keys(modes).length?{interfaceConnectionModes:{...modes}}:{})};}),
+      nodes:state.assembly.nodes.map(node=>{const labelGaps=node.interfaceLabelGaps||node.interfaceSignalGaps,modes=node.interfaceConnectionModes;return {id:node.id,boardId:node.boardId,label:node.label,x:node.x,y:node.y,rotation:nodeRotation(node),flipX:nodeFlipX(node),scale:nodeScale(node),fixed:nodeFixed(node),showName:nodeNameVisible(node),...(node.nameOffset?{nameOffset:{x:Number(node.nameOffset.x)||0,y:Number(node.nameOffset.y)||0}}:{}),...(labelGaps?{interfaceLabelGaps:{...labelGaps}}:{}),...(modes&&Object.keys(modes).length?{interfaceConnectionModes:{...modes}}:{})};}),
       connections:state.assembly.connections.map(connection=>({
         id:connection.id,
         mode:connectionMode(connection),
@@ -627,11 +717,13 @@
 
   function renderAssembly() {
     $('#assemblyName').value = state.assembly.name;
-    const canvas=$('#assemblyCanvas'),canvasSize=assemblyCanvasSize(),layer = $('#nodeLayer'),wireLayer=$('#wireLayer');
+    const canvas=$('#assemblyCanvas'),canvasSize=assemblyCanvasSize(),layer=$('#nodeLayer'),controlLayer=$('#nodeControlLayer'),wireLayer=$('#wireLayer'),controls=[];
     canvas.style.width=`${canvasSize.width*zoom}px`;canvas.style.height=`${canvasSize.height*zoom}px`;canvas.style.backgroundSize=`${18*zoom}px ${18*zoom}px`;
     layer.style.width=`${canvasSize.width}px`;layer.style.height=`${canvasSize.height}px`;
+    controlLayer.style.width=`${canvasSize.width}px`;controlLayer.style.height=`${canvasSize.height}px`;
     wireLayer.setAttribute('width',canvasSize.width);wireLayer.setAttribute('height',canvasSize.height);
     layer.style.transform = `scale(${zoom})`;
+    controlLayer.style.transform = `scale(${zoom})`;
     wireLayer.style.transform = `scale(${zoom})`;
     layer.innerHTML = state.assembly.nodes.map(node => {
       const board = state.boards.find(b => b.id === node.boardId);
@@ -657,9 +749,11 @@
       }).join('');
       const source=geometry.source,rotation=nodeRotation(node),scaleX=nodeFlipX(node)?-1:1;
       const imageSource=board.source==='generated'?placeholderSvg('',board.generated?.width,board.generated?.height,board.generated?.color):boardImageSource(board);
-      const generatedName=board.source==='generated'?`<span class="generated-node-name" style="left:${geometry.centerX}px;top:${geometry.centerY}px">${escapeHtml(board.name)}</span>`:'';
-      return `<article class="board-node ${node.id===selectedNodeId?'selected':''} ${nodeFixed(node)?'fixed':''}" data-id="${node.id}" style="left:${node.x}px;top:${node.y}px"><div class="node-body">${imageSource?`<img src="${imageSource}" data-board="${board.id}" alt="" style="left:${source.x}px;top:${source.y}px;width:${source.width}px;height:${source.height}px;transform:rotate(${rotation}deg) scaleX(${scaleX});transform-origin:center">`:`<div class="node-placeholder" style="transform:rotate(${rotation}deg) scaleX(${scaleX})"></div>`}${generatedName}</div><footer class="node-header"><strong>${nodeFixed(node)?'<span class="node-fixed-mark" title="位置已固定">◆</span> ':''}${escapeHtml(node.label)}</strong><button class="node-action node-scale-down" title="缩小板卡">−</button><span class="node-scale-label">${Math.round(nodeScale(node)*100)}%</span><button class="node-action node-scale-up" title="放大板卡">＋</button><button class="node-action node-flip" title="水平翻转">⇆</button><button class="node-action node-rotate" title="顺时针旋转 90°">↻</button><button class="node-action node-remove" title="移除板卡">×</button></footer>${ports}${pins}</article>`;
+      const nameOffset=nodeNameOffset(board,node),nameLabel=nodeNameVisible(node)?`<button type="button" class="node-name-label ${node.id===selectedNodeId?'selected':''}" data-node-name="${node.id}" style="left:${geometry.centerX+nameOffset.x}px;top:${geometry.centerY+nameOffset.y}px" title="拖动板卡名称">${escapeHtml(node.label)}</button>`:'';
+      controls.push(`<div class="node-controls" data-id="${node.id}" style="left:${node.x}px;top:${node.y}px">${ports}${pins}${nameLabel}</div>`);
+      return `<article class="board-node ${node.id===selectedNodeId?'selected':''} ${nodeFixed(node)?'fixed':''}" data-id="${node.id}" style="left:${node.x}px;top:${node.y}px"><div class="node-body">${imageSource?`<img src="${imageSource}" data-board="${board.id}" alt="" style="left:${source.x}px;top:${source.y}px;width:${source.width}px;height:${source.height}px;transform:rotate(${rotation}deg) scaleX(${scaleX});transform-origin:center">`:`<div class="node-placeholder" style="transform:rotate(${rotation}deg) scaleX(${scaleX})"></div>`}</div><footer class="node-header"><span class="node-header-spacer">${nodeFixed(node)?'<span class="node-fixed-mark" title="位置已固定">◆</span>':''}</span><button class="node-action node-scale-down" title="缩小板卡">−</button><span class="node-scale-label">${Math.round(nodeScale(node)*100)}%</span><button class="node-action node-scale-up" title="放大板卡">＋</button><button class="node-action node-flip" title="水平翻转">⇆</button><button class="node-action node-rotate" title="顺时针旋转 90°">↻</button><button class="node-action node-remove" title="移除板卡">×</button></footer></article>`;
     }).join('');
+    controlLayer.innerHTML=controls.join('');
     $$('.board-node').forEach(nodeEl => {
       const selectNode=()=>{selectedNodeId=nodeEl.dataset.id;selectedWireId=null;selectedWirePinKey=null;selectedPort=null;renderSelection();};
       nodeEl.onpointerdown = e => { if(e.button!==0)return;if(!e.target.closest('.node-port,.node-pin'))selectNode();const node=state.assembly.nodes.find(item=>item.id===nodeEl.dataset.id);if (!nodeFixed(node)&&!e.target.closest('.node-port,.node-pin,.node-action')) startNodeDrag(e,nodeEl.dataset.id); };
@@ -672,6 +766,10 @@
     });
     $$('.node-port').forEach(port => port.onclick = e => { e.stopPropagation(); selectPort(port.dataset.node, port.dataset.interface); });
     $$('.node-pin').forEach(pin=>pin.onclick=e=>{e.stopPropagation();selectedPort={nodeId:pin.dataset.node,interfaceId:pin.dataset.interface};selectedNodeId=null;selectedWireId=null;selectedWirePinKey=null;selectPortPin(Number(pin.dataset.pin));});
+    $$('.node-name-label').forEach(label=>{
+      label.onpointerdown=e=>{if(e.button!==0)return;e.stopPropagation();startNodeNameDrag(e,label.dataset.nodeName);};
+      label.onclick=e=>e.stopPropagation();
+    });
     $$('.node-body img[data-board]').forEach(img => {
       const captureSize = () => {
         const board = state.boards.find(b=>b.id===img.dataset.board);
@@ -695,8 +793,10 @@
 
   function renderSelection() {
     $$('.board-node').forEach(n => n.classList.toggle('selected', n.dataset.id === selectedNodeId));
+    $$('.node-name-label').forEach(label=>label.classList.toggle('selected',label.dataset.nodeName===selectedNodeId));
     $$('.node-port').forEach(port=>port.classList.toggle('selected',port.dataset.node===selectedPort?.nodeId&&port.dataset.interface===selectedPort?.interfaceId));
-    $$('.signal-wire').forEach(w => w.classList.toggle('selected', w.closest('.wire-group')?.dataset.id===selectedWireId&&w.dataset.pinKey===selectedWirePinKey));
+    $$('.wire-group.bundle-selectable').forEach(group=>group.classList.toggle('selected',group.dataset.id===selectedWireId&&!selectedWirePinKey));
+    $$('.signal-wire.selectable').forEach(w => w.classList.toggle('selected', w.closest('.wire-group')?.dataset.id===selectedWireId&&w.dataset.pinKey===selectedWirePinKey));
     renderAssemblyProperties();
   }
 
@@ -715,9 +815,17 @@
 
   function selectedSignal() {
     const connection=state.assembly.connections.find(item=>item.id===selectedWireId);if(!connection)return null;
+    if(connectionMode(connection)!=='signal'||!selectedWirePinKey)return null;
     const from=endpointDetails(connection.from),to=endpointDetails(connection.to);if(!from.intf||!to.intf)return null;
     const signal=connectionPinPairs(connection,from.intf,to.intf).find(pair=>wirePinKey(pair)===selectedWirePinKey);
     return signal?{connection,signal,from,to}:null;
+  }
+
+  function selectedBundle() {
+    const connection=state.assembly.connections.find(item=>item.id===selectedWireId);
+    if(!connection||connectionMode(connection)!=='bundle'||selectedWirePinKey)return null;
+    const from=endpointDetails(connection.from),to=endpointDetails(connection.to);
+    return from.intf&&to.intf?{connection,from,to}:null;
   }
 
   function editableSelectedSignal() {
@@ -746,15 +854,18 @@
     $('#defaultShowToLabels').checked=defaults.showToLabels;
     const node=state.assembly.nodes.find(item=>item.id===selectedNodeId),board=state.boards.find(item=>item.id===node?.boardId);
     const portNode=state.assembly.nodes.find(item=>item.id===selectedPort?.nodeId),portBoard=state.boards.find(item=>item.id===portNode?.boardId),portInterface=portBoard?.interfaces.find(item=>item.id===selectedPort?.interfaceId);
-    const selected=selectedSignal(),hasNode=!!node&&!!board,hasPort=!!portNode&&!!portInterface,hasSignal=!!selected;
-    $('#globalPropertyGroup').classList.toggle('hidden',hasNode||hasPort||hasSignal);
-    $('#nodePropertyGroup').classList.toggle('hidden',!hasNode||hasPort||hasSignal);
-    $('#portPropertyGroup').classList.toggle('hidden',!hasPort||hasSignal);
+    const selected=selectedSignal(),bundle=selectedBundle(),hasNode=!!node&&!!board,hasPort=!!portNode&&!!portInterface,hasSignal=!!selected,hasBundle=!!bundle;
+    $('#globalPropertyGroup').classList.toggle('hidden',hasNode||hasPort||hasSignal||hasBundle);
+    $('#nodePropertyGroup').classList.toggle('hidden',!hasNode||hasPort||hasSignal||hasBundle);
+    $('#portPropertyGroup').classList.toggle('hidden',!hasPort||hasSignal||hasBundle);
     $('#wirePropertyGroup').classList.toggle('hidden',!hasSignal);
-    $('#assemblyPropertyTitle').textContent=hasSignal?(connectionMode(selected.connection)==='signal'?'信号线属性':'线束属性'):hasPort?'端口属性':hasNode?'板卡属性':'全局属性';
+    $('#bundlePropertyGroup').classList.toggle('hidden',!hasBundle);
+    $('#assemblyPropertyTitle').textContent=hasSignal?'信号线属性':hasBundle?'线束属性':hasPort?'端口属性':hasNode?'板卡属性':'全局属性';
     if(node&&board){
       $('#nodePropertySummary').textContent=node.label;
       $('#nodeFixed').checked=nodeFixed(node);
+      $('#nodeShowName').checked=nodeNameVisible(node);
+      $('#resetNodeNamePositionBtn').disabled=!node.nameOffset;
       $('#nodeInterfaceGaps').innerHTML=board.interfaces.map(intf=>{const override=node.interfaceLabelGaps?.[intf.id]??node.interfaceSignalGaps?.[intf.id],value=override??defaults.gap;return `<div class="interface-gap-row"><span title="${escapeHtml(intf.name)}">${escapeHtml(intf.name)} · ${intf.pins.length}P</span><input type="range" min="0" max="24" step="1" value="${value}" data-interface="${intf.id}" aria-label="${escapeHtml(intf.name)} 信号标签间距"><output>${value}</output><button type="button" class="interface-gap-reset" data-reset-interface="${intf.id}" title="恢复全局 ${defaults.gap}" ${override==null?'disabled':''}>↺</button></div>`;}).join('')||'<div class="compact-empty">此板卡没有接口</div>';
     }
     if(hasPort){
@@ -762,6 +873,14 @@
       $('#portPropertySummary').innerHTML=`<b>${escapeHtml(portNode.label)}</b><br>${escapeHtml(portInterface.name)} · ${portInterface.pins.length}P`;
       $('#portSingleSignalMode').checked=single;
       $('#portModeHint').textContent=single?'点击画布上的 Pin 托盘选择起点；随后可用的对端托盘会自动展开。':'默认按针脚顺序整束连接，删除时会删除整条线束。';
+    }
+    if(hasBundle){
+      const pairs=connectionPinPairs(bundle.connection,bundle.from.intf,bundle.to.intf),count=pairs.length,gap=connectionWireGap(bundle.connection);
+      $('#bundleEndpointSummary').innerHTML=`<b>${escapeHtml(bundle.from.node?.label||'未知板卡')}</b> / ${escapeHtml(bundle.from.intf.name)}<br><b>${escapeHtml(bundle.to.node?.label||'未知板卡')}</b> / ${escapeHtml(bundle.to.intf.name)}<br>${count} 根信号线`;
+      $('#bundleRouteGap').value=gap;$('#bundleRouteGapValue').value=gap;
+      const fromValues=pairs.map(pair=>signalWireStyle(pair).showFromLabels),toValues=pairs.map(pair=>signalWireStyle(pair).showToLabels);
+      $('#bundleShowFromLabels').checked=fromValues.every(Boolean);$('#bundleShowFromLabels').indeterminate=fromValues.some(Boolean)&&!fromValues.every(Boolean);
+      $('#bundleShowToLabels').checked=toValues.every(Boolean);$('#bundleShowToLabels').indeterminate=toValues.some(Boolean)&&!toValues.every(Boolean);
     }
     if(!selected)return;
     const {signal,from,to}=selected,style=signalWireStyle(signal);
@@ -780,11 +899,12 @@
   }
 
   function deleteSelectedWire() {
-    const selected=selectedSignal();if(!selected)return;
-    if(connectionMode(selected.connection)==='signal'){
+    const connection=state.assembly.connections.find(item=>item.id===selectedWireId);if(!connection)return;
+    if(connectionMode(connection)==='signal'){
+      const selected=selectedSignal();if(!selected)return;
       selected.connection.pinMap=selected.connection.pinMap.filter(pair=>wirePinKey(pair)!==selectedWirePinKey);
       if(!selected.connection.pinMap.length)state.assembly.connections=state.assembly.connections.filter(connection=>connection!==selected.connection);
-    }else state.assembly.connections=state.assembly.connections.filter(connection=>connection!==selected.connection);
+    }else state.assembly.connections=state.assembly.connections.filter(item=>item!==connection);
     selectedWireId=null;
     selectedWirePinKey=null;
     saveState();
@@ -1056,20 +1176,28 @@
     return `${result} L${value(last.x)},${value(last.y)}`;
   }
 
+  function routedConnectionPairs(connection,pairs) {
+    const entries=pairs.map((pair,index)=>({pair,index,a:portPoint(connection.from,pair.from),b:portPoint(connection.to,pair.to)})).filter(entry=>entry.a&&entry.b);
+    const laneCoordinate=point=>point.dx!==0?point.y:point.x;
+    const laneRanks=new Map([...entries].sort((first,second)=>laneCoordinate(first.a)-laneCoordinate(second.a)||first.index-second.index).map((entry,rank)=>[entry.index,rank]));
+    const gap=connectionWireGap(connection);
+    return entries.map(entry=>({...entry,laneOffset:(laneRanks.get(entry.index)-(entries.length-1)/2)*gap}));
+  }
+
   function renderWires() {
     $('#wireLayer').innerHTML = state.assembly.connections.map(c => {
       const from=endpointDetails(c.from),to=endpointDetails(c.to);if(!from.intf||!to.intf)return '';
       const pairs=connectionPinPairs(c,from.intf,to.intf),bundleA=portPoint(c.from),bundleB=portPoint(c.to);
-      const lines=pairs.map((pair,index)=>{
-        const a=portPoint(c.from,pair.from),b=portPoint(c.to,pair.to);if(!a||!b)return '';
-        const centeredIndex=index-(pairs.length-1)/2;
-        const style=signalWireStyle(pair),d=roundedPath(routePath(a,b,centeredIndex*connectionWireGap(c),bundleA,bundleB),style.cornerRadius),pinKey=wirePinKey(pair);
-        const selected=c.id===selectedWireId&&pinKey===selectedWirePinKey?'selected':'';
-        return `<g class="signal-wire ${selected}" data-pin-key="${pinKey}" style="--wire-width:${style.width}px;--wire-outline-width:${style.width+2.8}px"><path class="wire-hit" d="${d}"/><path class="wire-outline" d="${d}"/><path class="wire-path" d="${d}" stroke="${pair.color}"/>${style.showFromLabels?pinTagMarkup(a,pair.fromName,pair.color):''}${style.showToLabels?pinTagMarkup(b,pair.toName,pair.color):''}${wireMiddleLabelMarkup(pair.label,d)}</g>`;
+      const singleSelectable=connectionMode(c)==='signal',bundleSelected=!singleSelectable&&c.id===selectedWireId&&!selectedWirePinKey;
+      const lines=routedConnectionPairs(c,pairs).map(({pair,a,b,laneOffset})=>{
+        const style=signalWireStyle(pair),d=roundedPath(routePath(a,b,laneOffset,bundleA,bundleB),style.cornerRadius),pinKey=wirePinKey(pair);
+        const selected=singleSelectable&&c.id===selectedWireId&&pinKey===selectedWirePinKey?'selected':'';
+        return `<g class="signal-wire ${singleSelectable?'selectable':''} ${selected}" data-pin-key="${pinKey}" style="--wire-width:${style.width}px;--wire-outline-width:${style.width+2.8}px"><path class="wire-hit" d="${d}"/><path class="wire-outline" d="${d}"/><path class="wire-path" d="${d}" stroke="${pair.color}"/>${style.showFromLabels?pinTagMarkup(a,pair.fromName,pair.color):''}${style.showToLabels?pinTagMarkup(b,pair.toName,pair.color):''}${wireMiddleLabelMarkup(pair.label,d)}</g>`;
       }).join('');
-      return `<g class="wire-group" data-id="${c.id}">${lines}</g>`;
+      return `<g class="wire-group ${singleSelectable?'':'bundle-selectable'} ${bundleSelected?'selected':''}" data-id="${c.id}">${lines}</g>`;
     }).join('');
-    $$('.signal-wire').forEach(w => w.onclick = e => { e.stopPropagation(); selectedWireId=w.closest('.wire-group').dataset.id;selectedWirePinKey=w.dataset.pinKey;selectedNodeId=null;selectedPort=null;renderSelection(); });
+    $$('.signal-wire.selectable').forEach(w => w.onclick = e => { e.stopPropagation(); selectedWireId=w.closest('.wire-group').dataset.id;selectedWirePinKey=w.dataset.pinKey;selectedNodeId=null;selectedPort=null;renderSelection(); });
+    $$('.wire-group.bundle-selectable').forEach(group=>group.onclick=e=>{e.stopPropagation();selectedWireId=group.dataset.id;selectedWirePinKey=null;selectedNodeId=null;selectedPort=null;renderSelection();});
   }
 
   function startNodeDrag(e, nodeId) {
@@ -1078,11 +1206,35 @@
     $('#assemblyCanvas').setPointerCapture(e.pointerId); e.preventDefault();
   }
 
+  function startNodeNameDrag(e,nodeId) {
+    const node=state.assembly.nodes.find(item=>item.id===nodeId),board=state.boards.find(item=>item.id===node?.boardId);if(!node||!board)return;
+    const offset=nodeNameOffset(board,node);
+    selectedNodeId=node.id;selectedWireId=null;selectedWirePinKey=null;selectedPort=null;
+    nameDragState={node,board,startClientX:e.clientX,startClientY:e.clientY,startX:offset.x,startY:offset.y,pointerId:e.pointerId};
+    $('#assemblyCanvas').setPointerCapture(e.pointerId);renderSelection();e.preventDefault();
+  }
+
+  function moveNodeName(e) {
+    if(!nameDragState)return false;
+    const x=nameDragState.startX+(e.clientX-nameDragState.startClientX)/zoom,y=nameDragState.startY+(e.clientY-nameDragState.startClientY)/zoom;
+    nameDragState.node.nameOffset={x,y};
+    const geometry=getBoardImageGeometry(nameDragState.board,nameDragState.node),label=$(`.node-name-label[data-node-name="${nameDragState.node.id}"]`);
+    if(label){label.style.left=`${geometry.centerX+x}px`;label.style.top=`${geometry.centerY+y}px`;}
+    return true;
+  }
+
+  function endNodeNameDrag() {
+    if(!nameDragState)return false;
+    nameDragState=null;ignoreCanvasClickUntil=performance.now()+150;saveState();renderAssemblyProperties();return true;
+  }
+
   function moveNode(e) {
     if (!dragState) return;
     const r=$('#assemblyCanvas').getBoundingClientRect();
     dragState.node.x=Math.max(0,(e.clientX-r.left-dragState.ox)/zoom); dragState.node.y=Math.max(0,(e.clientY-r.top-dragState.oy)/zoom);
-    const el=$(`.board-node[data-id="${dragState.node.id}"]`); if(el) {el.style.left=`${dragState.node.x}px`;el.style.top=`${dragState.node.y}px`;}
+    const el=$(`.board-node[data-id="${dragState.node.id}"]`),controls=$(`.node-controls[data-id="${dragState.node.id}"]`);
+    if(el){el.style.left=`${dragState.node.x}px`;el.style.top=`${dragState.node.y}px`;}
+    if(controls){controls.style.left=`${dragState.node.x}px`;controls.style.top=`${dragState.node.y}px`;}
     renderWires();
   }
   function endNodeDrag() { if(dragState){dragState=null;ignoreCanvasClickUntil=performance.now()+150;saveState();} }
@@ -1247,16 +1399,20 @@
     const exportWireData=state.assembly.connections.flatMap(connection=>{
       const from=endpointDetails(connection.from),to=endpointDetails(connection.to);if(!from.intf||!to.intf)return [];
       const pairs=connectionPinPairs(connection,from.intf,to.intf),bundleA=portPoint(connection.from),bundleB=portPoint(connection.to);
-      return pairs.map((pair,index)=>{
-        const a=portPoint(connection.from,pair.from),b=portPoint(connection.to,pair.to);
-        const centeredIndex=index-(pairs.length-1)/2;
+      return routedConnectionPairs(connection,pairs).map(({pair,index,a,b,laneOffset})=>{
         const style=signalWireStyle(pair);
-        return a&&b?{connection,pair,a,b,style,index,d:roundedPath(routePath(a,b,centeredIndex*connectionWireGap(connection),bundleA,bundleB),style.cornerRadius)}:null;
-      }).filter(Boolean);
+        return {connection,pair,a,b,style,index,d:roundedPath(routePath(a,b,laneOffset,bundleA,bundleB),style.cornerRadius)};
+      });
     });
     const visualBounds=nodes.map(node=>{
       const board=state.boards.find(b=>b.id===node.boardId), image=getBoardImageGeometry(board,node).bounds;
       return {left:node.x+image.x,top:node.y+image.y,right:node.x+image.x+image.width,bottom:node.y+image.y+image.height};
+    });
+    nodes.forEach(node=>{
+      const board=state.boards.find(b=>b.id===node.boardId);if(!board||!nodeNameVisible(node))return;
+      const geometry=getBoardImageGeometry(board,node),offset=nodeNameOffset(board,node),x=node.x+geometry.centerX+offset.x,y=node.y+geometry.centerY+offset.y;
+      const labelWidth=Math.max(40,Math.min(220,String(node.label).length*7+16));
+      visualBounds.push({left:x-labelWidth/2,top:y-11,right:x+labelWidth/2,bottom:y+11});
     });
     exportWireData.forEach(wire=>{
       const values=(wire.d.match(/-?\d+(?:\.\d+)?/g)||[]).map(Number),xs=[],ys=[];
@@ -1279,11 +1435,16 @@
       const geometry=getBoardImageGeometry(board,node),source=geometry.source,scaleX=nodeFlipX(node)?-1:1;
       const imageSource=boardImageSource(board),image=board.source==='generated'?generatedBoardSvg(board,source,false):imageSource?`<image href="${escapeXml(imageSource)}" x="${source.x}" y="${source.y}" width="${source.width}" height="${source.height}" preserveAspectRatio="none" filter="url(#shadow)"/>`:`<rect x="${source.x}" y="${source.y}" width="${source.width}" height="${source.height}" rx="5" fill="#28513f" stroke="#c49b41" stroke-width="5" filter="url(#shadow)"/>`;
       const transform=`translate(${geometry.centerX} ${geometry.centerY}) rotate(${geometry.rotation}) scale(${scaleX} 1) translate(${-geometry.centerX} ${-geometry.centerY})`;
-      const generatedName=board.source==='generated'?`<text x="${geometry.centerX}" y="${geometry.centerY}" text-anchor="middle" dominant-baseline="middle" font-size="11" font-weight="800" fill="#eef8f3">${escapeXml(board.name)}</text>`:'';
-      return `<g transform="translate(${node.x} ${node.y})"><g transform="${transform}">${image}</g>${generatedName}</g>`;
+      return `<g transform="translate(${node.x} ${node.y})"><g transform="${transform}">${image}</g></g>`;
     }).join('');
 
-    return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><defs><filter id="shadow" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="5" stdDeviation="5" flood-color="#263951" flood-opacity=".16"/></filter></defs><rect width="100%" height="100%" fill="#fff"/><text x="${padding}" y="38" font-size="20" font-weight="800" fill="#111">${escapeXml(state.assembly.name)}</text><g transform="translate(${tx} ${ty})"><g>${wires}</g><g>${nodeMarkup}</g></g></svg>`;
+    const nodeNameMarkup=nodes.map(node=>{
+      const board=state.boards.find(b=>b.id===node.boardId);if(!board||!nodeNameVisible(node))return '';
+      const geometry=getBoardImageGeometry(board,node),offset=nodeNameOffset(board,node),x=node.x+geometry.centerX+offset.x,y=node.y+geometry.centerY+offset.y;
+      return `<text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="middle" font-family="ui-sans-serif,system-ui,sans-serif" font-size="11" font-weight="800" fill="#25334a" stroke="#fff" stroke-width="4" stroke-linejoin="round" paint-order="stroke">${escapeXml(node.label)}</text>`;
+    }).join('');
+
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><defs><filter id="shadow" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="5" stdDeviation="5" flood-color="#263951" flood-opacity=".16"/></filter></defs><rect width="100%" height="100%" fill="#fff"/><text x="${padding}" y="38" font-size="20" font-weight="800" fill="#111">${escapeXml(state.assembly.name)}</text><g transform="translate(${tx} ${ty})"><g>${nodeMarkup}</g><g>${wires}</g><g>${nodeNameMarkup}</g></g></svg>`;
   }
 
   function renderAssemblyDocumentSvg(documentData) {
@@ -1375,12 +1536,22 @@
     $('#boardZoomInBtn').onclick=()=>changeBoardZoom(1.25);
     $('#boardZoomOutBtn').onclick=()=>changeBoardZoom(.8);
     $('#boardZoomFitBtn').onclick=fitBoardImage;
-    $('#boardName').oninput=e=>{const b=currentBoard();b.name=e.target.value||'未命名板卡';$('#boardBreadcrumb').textContent=b.name;if(b.source==='generated')redrawGeneratedBoard(b);else{saveState();renderBoardList();renderComponentList();}};
+    $('#boardName').oninput=e=>{
+      const board=currentBoard();if(!board)return;
+      board.name=e.target.value||'未命名板卡';
+      state.assembly.nodes.filter(node=>node.boardId===board.id).forEach(node=>{node.label=board.name;});
+      $('#boardBreadcrumb').textContent=board.name;
+      if(board.source==='generated')redrawGeneratedBoard(board);else{saveState();renderBoardList();renderComponentList();}
+    };
     $('#virtualBoardWidth').onchange=applyVirtualBoardSettings;
     $('#virtualBoardHeight').onchange=applyVirtualBoardSettings;
     $('#virtualBoardColor').oninput=applyVirtualBoardSettings;
     $('#pickTransparentColorBtn').onclick=()=>setTransparentColorPicking(!transparentColorPicking);
     $('#clearTransparentColorBtn').onclick=clearTransparentColor;
+    $('#imageRotationSlider').oninput=e=>{$('#imageRotationAngle').value=e.target.value;previewImportedImageRotation(e.target.value);};
+    $('#imageRotationSlider').onchange=e=>rotateImportedImage(e.target.value);
+    $('#imageRotationAngle').oninput=e=>{const value=e.target.value;syncImageRotationControls(currentBoard());$('#imageRotationAngle').value=value;$('#imageRotationSlider').value=normalizedImageRotation(value);};
+    $('#imageRotationAngle').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();rotateImportedImage(e.target.value);}else if(e.key==='Escape')syncImageRotationControls();};
     $('#imageStage').onpointerdown=onStagePointerDown;$('#imageStage').onpointermove=onStagePointerMove;$('#imageStage').onpointerup=onStagePointerUp;$('#imageStage').onpointercancel=onStagePointerUp;
     $('#imageStage').addEventListener('wheel',e=>{if(e.ctrlKey||e.metaKey){e.preventDefault();changeBoardZoom(e.deltaY<0?1.12:.89);}},{passive:false});
     $('#interfaceName').oninput=e=>{const i=currentInterface();i.name=e.target.value;saveState();renderInterfaces();renderBoardList();};
@@ -1410,19 +1581,27 @@
     $('#nodeInterfaceGaps').onclick=e=>{const button=e.target.closest('[data-reset-interface]'),node=state.assembly.nodes.find(item=>item.id===selectedNodeId);if(!button||!node)return;delete node.interfaceLabelGaps?.[button.dataset.resetInterface];delete node.interfaceSignalGaps?.[button.dataset.resetInterface];if(node.interfaceLabelGaps&&!Object.keys(node.interfaceLabelGaps).length)delete node.interfaceLabelGaps;if(node.interfaceSignalGaps&&!Object.keys(node.interfaceSignalGaps).length)delete node.interfaceSignalGaps;saveState();renderAssemblyProperties();renderWires();};
     $('#resetNodeGapsBtn').onclick=()=>{const node=state.assembly.nodes.find(item=>item.id===selectedNodeId);if(!node)return;delete node.interfaceLabelGaps;delete node.interfaceSignalGaps;saveState();renderAssemblyProperties();renderWires();};
     $('#nodeFixed').onchange=e=>{const node=state.assembly.nodes.find(item=>item.id===selectedNodeId);if(!node)return;node.fixed=e.target.checked;saveState();renderAssembly();toast(node.fixed?'板卡位置已固定':'板卡位置已解除固定');};
+    $('#nodeShowName').onchange=e=>{const node=state.assembly.nodes.find(item=>item.id===selectedNodeId);if(!node)return;node.showName=e.target.checked;saveState();renderAssembly();};
+    $('#resetNodeNamePositionBtn').onclick=()=>{const node=state.assembly.nodes.find(item=>item.id===selectedNodeId);if(!node)return;delete node.nameOffset;saveState();renderAssembly();};
     $('#portSingleSignalMode').onchange=e=>{const node=state.assembly.nodes.find(item=>item.id===selectedPort?.nodeId);if(!node||!selectedPort)return;const conflicting=state.assembly.connections.some(connection=>connectionMode(connection)===(e.target.checked?'bundle':'signal')&&(sameEndpoint(connection.from,selectedPort)||sameEndpoint(connection.to,selectedPort)));if(conflicting){e.target.checked=!e.target.checked;toast(e.target.checked?'请先删除该端口的单信号线连接':'请先删除该端口的整束连接');return;}node.interfaceConnectionModes=node.interfaceConnectionModes||{};if(e.target.checked)node.interfaceConnectionModes[selectedPort.interfaceId]='signal';else delete node.interfaceConnectionModes[selectedPort.interfaceId];if(!Object.keys(node.interfaceConnectionModes).length)delete node.interfaceConnectionModes;if(sameEndpoint(pendingPort,selectedPort))pendingPort=null;saveState();renderAssembly();toast(e.target.checked?'已开启单信号线连接模式':'已恢复整束连接模式');};
     $('#wireDisplayName').oninput=e=>{const signal=editableSelectedSignal();if(!signal)return;signal.label=e.target.value;saveState();renderWires();};
     $('#wireWidth').oninput=e=>{const signal=editableSelectedSignal();if(!signal)return;signal.style=signal.style||{};signal.style.width=Math.max(1,Math.min(8,+e.target.value||assemblyWireDefaults().width));$('#wireWidthValue').value=signal.style.width.toFixed(1);saveState();renderWires();};
     $('#wireCornerRadius').oninput=e=>{const signal=editableSelectedSignal();if(!signal)return;signal.style=signal.style||{};signal.style.cornerRadius=Math.max(0,Math.min(24,Number(e.target.value)));$('#wireCornerRadiusValue').value=signal.style.cornerRadius;saveState();renderWires();};
     $('#wireRouteGap').oninput=e=>{const selected=selectedSignal();if(!selected)return;selected.connection.gap=Math.max(0,Math.min(20,Number(e.target.value)));$('#wireRouteGapValue').value=selected.connection.gap;saveState();renderWires();};
     $('#resetWireGapBtn').onclick=()=>{const selected=selectedSignal();if(!selected)return;delete selected.connection.gap;saveState();renderAssemblyProperties();renderWires();};
+    $('#bundleRouteGap').oninput=e=>{const selected=selectedBundle();if(!selected)return;selected.connection.gap=Math.max(0,Math.min(20,Number(e.target.value)));$('#bundleRouteGapValue').value=selected.connection.gap;saveState();renderWires();};
+    $('#resetBundleGapBtn').onclick=()=>{const selected=selectedBundle();if(!selected)return;delete selected.connection.gap;saveState();renderAssemblyProperties();renderWires();};
+    const setBundleLabelVisibility=(side,visible)=>{const selected=selectedBundle();if(!selected)return;if(!selected.connection.pinMap?.length)selected.connection.pinMap=connectionPinPairs(selected.connection,selected.from.intf,selected.to.intf).map(pair=>({from:pair.from,to:pair.to}));selected.connection.pinMap.forEach(pair=>{pair.style={...(pair.style||{}),[side]:visible};});saveState();renderAssemblyProperties();renderWires();};
+    $('#bundleShowFromLabels').onchange=e=>setBundleLabelVisibility('showFromLabels',e.target.checked);
+    $('#bundleShowToLabels').onchange=e=>setBundleLabelVisibility('showToLabels',e.target.checked);
     $('#wireShowFromLabels').onchange=e=>{const signal=editableSelectedSignal();if(!signal)return;signal.style={...(signal.style||{}),showFromLabels:e.target.checked};saveState();renderWires();};
     $('#wireShowToLabels').onchange=e=>{const signal=editableSelectedSignal();if(!signal)return;signal.style={...(signal.style||{}),showToLabels:e.target.checked};saveState();renderWires();};
     $('#resetWireStyleBtn').onclick=()=>{const signal=editableSelectedSignal();if(!signal)return;delete signal.style;saveState();renderAssemblyProperties();renderWires();};
     $('#deleteWireBtn').onclick=deleteSelectedWire;
+    $('#deleteBundleBtn').onclick=deleteSelectedWire;
     const canvas=$('#assemblyCanvas');canvas.ondragover=e=>e.preventDefault();canvas.ondrop=e=>{e.preventDefault();const id=e.dataTransfer.getData('text/pcb-id'),r=canvas.getBoundingClientRect();if(id)addNode(id,{x:(e.clientX-r.left)/zoom-NODE.width/2,y:(e.clientY-r.top)/zoom-NODE.height/2});};
-    canvas.onpointermove=moveNode;canvas.onpointerup=endNodeDrag;canvas.onpointercancel=endNodeDrag;
-    canvas.onclick=e=>{if(performance.now()<ignoreCanvasClickUntil)return;if(e.target===canvas||e.target.id==='nodeLayer'){selectedNodeId=null;selectedWireId=null;selectedWirePinKey=null;selectedPort=null;pendingPort=null;renderAssembly();}};
+    canvas.onpointermove=e=>{if(!moveNodeName(e))moveNode(e);};canvas.onpointerup=()=>{if(!endNodeNameDrag())endNodeDrag();};canvas.onpointercancel=()=>{if(!endNodeNameDrag())endNodeDrag();};
+    canvas.onclick=e=>{if(performance.now()<ignoreCanvasClickUntil)return;if(e.target===canvas||e.target.id==='nodeLayer'||e.target.id==='nodeControlLayer'){selectedNodeId=null;selectedWireId=null;selectedWirePinKey=null;selectedPort=null;pendingPort=null;renderAssembly();}};
     $('#assemblyViewport').addEventListener('wheel',e=>{e.preventDefault();setAssemblyZoom(zoom*(e.deltaY<0?1.1:.9),e.clientX,e.clientY);},{passive:false});
     $('#zoomInBtn').onclick=()=>setAssemblyZoom(zoom+.1);$('#zoomOutBtn').onclick=()=>setAssemblyZoom(zoom-.1);
     document.onkeydown=e=>{

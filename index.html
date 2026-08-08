@@ -65,6 +65,7 @@
               </div>
               <div id="imageTransparencyControls" class="image-transparency-controls hidden">
                 <span class="transparency-badge">图片背景</span>
+                <label class="image-rotation-field">旋转 <input id="imageRotationSlider" type="range" min="-180" max="180" step="1" value="0" aria-label="图片旋转角度" /><input id="imageRotationAngle" type="number" min="-180" max="180" step="0.1" value="0" />°</label>
                 <button class="secondary-btn transparency-picker-btn" id="pickTransparentColorBtn" type="button">吸取透明色</button>
                 <span id="transparentColorStatus" class="transparent-color-status"><i></i><span>尚未设置</span></span>
                 <button class="danger-link transparency-clear hidden" id="clearTransparentColorBtn" type="button">清除</button>
@@ -164,8 +165,9 @@
           </div>
           <div id="assemblyViewport" class="assembly-viewport">
             <div id="assemblyCanvas" class="assembly-canvas">
-              <svg id="wireLayer" class="wire-layer" aria-hidden="true"></svg>
               <div id="nodeLayer" class="node-layer"></div>
+              <svg id="wireLayer" class="wire-layer" aria-hidden="true"></svg>
+              <div id="nodeControlLayer" class="node-control-layer"></div>
               <div id="assemblyEmpty" class="assembly-empty">
                 <div class="flow-graphic"><span></span><i>＋</i><span></span></div>
                 <h3>开始搭建连接图</h3>
@@ -197,9 +199,11 @@
             <label class="check-field"><input id="defaultShowToLabels" type="checkbox" checked /><span>默认显示端点 2 信号名</span></label>
           </section>
           <section id="nodePropertyGroup" class="property-group hidden">
-            <h3>所选板卡 · 接口标签间距</h3>
+            <h3>所选板卡</h3>
             <div id="nodePropertySummary" class="wire-endpoint-summary"></div>
             <label class="check-field"><input id="nodeFixed" type="checkbox" /><span>固定板卡位置</span></label>
+            <label class="check-field"><input id="nodeShowName" type="checkbox" checked /><span>显示板卡名称</span></label>
+            <button type="button" class="secondary-btn full" id="resetNodeNamePositionBtn">名称恢复默认位置</button>
             <div id="nodeInterfaceGaps" class="interface-gap-list"></div>
             <button type="button" class="secondary-btn full" id="resetNodeGapsBtn">全部恢复全局标签间距</button>
           </section>
@@ -223,6 +227,15 @@
               <button type="button" class="secondary-btn full" id="resetWireStyleBtn">恢复全局样式</button>
               <button type="button" class="danger-link" id="deleteWireBtn">删除整条线束</button>
             </form>
+          </section>
+          <section id="bundlePropertyGroup" class="property-group hidden">
+            <h3>所选线束</h3>
+            <div id="bundleEndpointSummary" class="wire-endpoint-summary"></div>
+            <label class="range-field"><span>导线间距<output id="bundleRouteGapValue">6</output></span><input id="bundleRouteGap" type="range" min="0" max="20" step="0.5" value="6" /></label>
+            <button type="button" class="secondary-btn full" id="resetBundleGapBtn">线束间距恢复全局</button>
+            <label class="check-field"><input id="bundleShowFromLabels" type="checkbox" /><span>显示端点 1 信号名</span></label>
+            <label class="check-field"><input id="bundleShowToLabels" type="checkbox" /><span>显示端点 2 信号名</span></label>
+            <button type="button" class="danger-link" id="deleteBundleBtn">删除整条线束</button>
           </section>
         </aside>
       </section>

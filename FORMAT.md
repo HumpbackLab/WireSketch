@@ -2,7 +2,7 @@
 
 WireSketch 使用两类 JSON 文件：PCB 描述文件和装配体描述文件。两者都面向人类、程序和 AI，字段语义稳定，不依赖界面实现细节。
 
-PCB 当前 `schemaVersion` 为 `1.1.0`，装配体当前为 `1.3.0`。`schema` URN 中的 `1.0` 和顶层 `version: 1` 表示兼容主版本；1.1 新增方向与节点变换字段，1.2 新增导线显示字段，1.3 新增端口连接模式和连接类型；这些字段均提供旧文件默认值。
+PCB 当前 `schemaVersion` 为 `1.1.0`，装配体当前为 `1.4.0`。`schema` URN 中的 `1.0` 和顶层 `version: 1` 表示兼容主版本；1.1 新增方向与节点变换字段，1.2 新增导线显示字段，1.3 新增端口连接模式和连接类型，1.4 新增板卡名称显隐及可拖动位置；这些字段均提供旧文件默认值。
 
 - PCB Schema：[schemas/pcb.schema.json](schemas/pcb.schema.json)
 - 装配体 Schema：[schemas/assembly.schema.json](schemas/assembly.schema.json)
@@ -19,6 +19,7 @@ PCB 当前 `schemaVersion` 为 `1.1.0`，装配体当前为 `1.3.0`。`schema` U
 6. `pins` 数组就是物理线序。数组第一个元素是 Pin 1，禁止按字母重新排序；允许多个针脚同名，例如多个 GND。
 7. `interfaces[].rotation` 是接口顺时针旋转角度，只能为 `0`、`90`、`180`、`270`：对应 Pin 1 位于左、上、右、下。省略时按 `0` 处理。
 8. `nodes[].rotation` 只能为 `0`、`90`、`180`、`270`；`nodes[].flipX` 必须为布尔值；`nodes[].scale` 必须在 `0.5` 到 `2` 之间。
+   `nodes[].showName` 控制名称显隐；`nodes[].nameOffset` 是相对板卡图片中心的名称偏移量，省略时名称默认位于板卡下方。
 9. `nodes[].boardId` 引用 `embeddedBoards[].id`；`connections` 端点中的 `nodeId` 引用 `nodes[].id`。
 10. `interfaceId` 必须存在于该节点所引用的 PCB 中，不能引用另一块板的接口。
 11. `pinMap` 使用从 1 开始的物理针脚号，方向与 `from`、`to` 一致。UART 等连接通常需要交叉映射，不要默认所有协议都直连。

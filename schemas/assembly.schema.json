@@ -8,7 +8,7 @@
   "required": ["schema", "schemaVersion", "kind", "version", "id", "name", "layout", "nodes", "connections", "embeddedBoards"],
   "properties": {
     "schema": { "const": "urn:wiresketch:schema:assembly:1.0", "description": "Stable format identifier. Never translate or modify it." },
-    "schemaVersion": { "enum": ["1.1.0", "1.2.0", "1.3.0"], "description": "1.3.0 adds per-interface connection modes and distinguishes bundle connections from manually connected signals." },
+    "schemaVersion": { "enum": ["1.1.0", "1.2.0", "1.3.0", "1.4.0"], "description": "1.4.0 adds independently visible and draggable board-instance names." },
     "kind": { "const": "wiresketch/assembly" },
     "version": { "const": 1 },
     "id": { "$ref": "#/$defs/id" },
@@ -70,6 +70,8 @@
         "flipX": { "type": "boolean", "default": false, "description": "Mirrors this PCB instance horizontally in its local, unrotated coordinate system." },
         "scale": { "type": "number", "minimum": 0.5, "maximum": 2, "default": 1, "description": "Visual scale of this PCB instance. Image, interfaces, pins, routing anchors, and export output scale together." },
         "fixed": { "type": "boolean", "default": false, "description": "Prevents this board instance from being dragged or moved by automatic layout." },
+        "showName": { "type": "boolean", "default": true, "description": "Controls whether this board instance label is shown on the assembly canvas and in image exports." },
+        "nameOffset": { "$ref": "#/$defs/nameOffset" },
         "interfaceLabelGaps": {
           "type": "object",
           "description": "Optional spacing added between adjacent signal-name labels, keyed by interface ID for this board instance; wire paths are unaffected.",
@@ -80,6 +82,16 @@
           "description": "Optional per-interface assembly connection mode keyed by interface ID. Omitted interfaces use bundle mode.",
           "additionalProperties": { "const": "signal" }
         }
+      }
+    },
+    "nameOffset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y"],
+      "description": "Draggable board-name position relative to the center of the rendered board image, in diagram-px.",
+      "properties": {
+        "x": { "type": "number", "minimum": -3000, "maximum": 3000 },
+        "y": { "type": "number", "minimum": -3000, "maximum": 3000 }
       }
     },
     "endpoint": {
