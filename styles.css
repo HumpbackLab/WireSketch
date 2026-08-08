@@ -79,6 +79,16 @@ main, .workspace { height: calc(100vh - 68px); }
 .virtual-board-controls input[type="color"] { width: 28px; height: 25px; padding: 2px; border: 1px solid #ccd8eb; border-radius: 5px; background: white; }
 .virtual-badge { padding: 3px 6px; color: var(--blue); background: white; border-radius: 4px; font-weight: 750; white-space: nowrap; }
 .virtual-tip { margin-left: auto; color: #8795a8; }
+.image-transparency-controls { min-height: 40px; margin: 0 0 9px; padding: 6px 9px; display: flex; align-items: center; gap: 9px; background: #f7f8fb; border: 1px solid #e0e5ec; border-radius: 7px; color: #617089; font-size: 9px; }
+.transparency-badge { padding: 3px 6px; color: #59677c; background: white; border: 1px solid #e2e6ec; border-radius: 4px; font-weight: 750; white-space: nowrap; }
+.transparency-picker-btn { min-height: 28px; padding: 0 10px; font-size: 10px; }
+.transparency-picker-btn.active { color: white; border-color: var(--blue); background: var(--blue); box-shadow: 0 0 0 3px rgba(39,100,231,.12); }
+.transparent-color-status { display: flex; align-items: center; gap: 5px; color: #7c899b; font: 9px ui-monospace, monospace; white-space: nowrap; }
+.transparent-color-status i { width: 14px; height: 14px; border: 1px solid #cbd3dd; border-radius: 3px; background: linear-gradient(45deg,#ddd 25%,transparent 25%),linear-gradient(-45deg,#ddd 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#ddd 75%),linear-gradient(-45deg,transparent 75%,#ddd 75%); background-size: 8px 8px; background-position: 0 0,0 4px,4px -4px,-4px 0; }
+.transparency-clear { margin: 0; font-size: 9px; }
+.transparency-tip { margin-left: auto; color: #929dac; }
+.image-stage.color-picking { cursor: crosshair; outline: 2px solid rgba(39,100,231,.35); }
+.image-stage.color-picking .interface-box { pointer-events: none; }
 .step-pill { width: 21px; height: 21px; display: inline-grid; place-items: center; border-radius: 50%; color: var(--blue); background: #e6edfd; font-size: 10px; }
 .image-stage { flex: 1; position: relative; min-height: 0; background-color: #edf0f4; background-image: linear-gradient(45deg, #e8ebef 25%, transparent 25%), linear-gradient(-45deg, #e8ebef 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #e8ebef 75%), linear-gradient(-45deg, transparent 75%, #e8ebef 75%); background-size: 20px 20px; background-position: 0 0, 0 10px, 10px -10px, -10px 0; border: 1px solid #dce2e9; border-radius: 10px; overflow: auto; user-select: none; }
 .image-stage:focus { outline: 2px solid rgba(39,100,231,.2); }

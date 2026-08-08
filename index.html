@@ -63,6 +63,13 @@
                 <label>背景 <input id="virtualBoardColor" type="color" value="#1d5b42" /></label>
                 <span class="virtual-tip">修改上方名称可同步更新板中文字</span>
               </div>
+              <div id="imageTransparencyControls" class="image-transparency-controls hidden">
+                <span class="transparency-badge">图片背景</span>
+                <button class="secondary-btn transparency-picker-btn" id="pickTransparentColorBtn" type="button">吸取透明色</button>
+                <span id="transparentColorStatus" class="transparent-color-status"><i></i><span>尚未设置</span></span>
+                <button class="danger-link transparency-clear hidden" id="clearTransparentColorBtn" type="button">清除</button>
+                <span class="transparency-tip">点击取色后，再点击图片中的背景颜色</span>
+              </div>
               <div id="imageStage" class="image-stage" tabindex="0">
                 <div id="emptyImage" class="empty-image">
                   <div class="upload-graphic">⌁</div>

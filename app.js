@@ -62,6 +62,45 @@
   let interfaceDragState = null;
   let dragState = null;
   let ignoreCanvasClickUntil = 0;
+  let transparentColorPicking = false;
+  const transparentImageCache = new Map();
+  const transparentImageJobs = new Map();
+
+  function transparencyKey(board) {
+    const config=board?.backgroundTransparency;
+    return config&&/^#[0-9a-f]{6}$/i.test(config.color||'')?`${config.color.toLowerCase()}|${Number(config.tolerance)||0}`:null;
+  }
+
+  function boardImageSource(board) {
+    const key=transparencyKey(board),cached=key&&transparentImageCache.get(board.id);
+    return cached?.key===key&&cached.source===board.image?cached.dataUrl:board?.image;
+  }
+
+  function loadImageSource(source) {
+    return new Promise((resolve,reject)=>{const image=new Image();image.onload=()=>resolve(image);image.onerror=reject;image.src=source;});
+  }
+
+  async function ensureTransparentBoardImage(board) {
+    const key=transparencyKey(board);
+    if(!key||!board?.image)return board?.image;
+    const source=board.image,cached=transparentImageCache.get(board.id);if(cached?.key===key&&cached.source===source)return cached.dataUrl;
+    if(transparentImageJobs.get(board.id)?.key===key&&transparentImageJobs.get(board.id)?.source===source)return transparentImageJobs.get(board.id).promise;
+    const promise=(async()=>{
+      const image=await loadImageSource(board.image);
+      const canvas=document.createElement('canvas');canvas.width=image.naturalWidth;canvas.height=image.naturalHeight;
+      const context=canvas.getContext('2d',{willReadFrequently:true});context.drawImage(image,0,0);
+      const pixels=context.getImageData(0,0,canvas.width,canvas.height),data=pixels.data;
+      const color=board.backgroundTransparency.color,red=parseInt(color.slice(1,3),16),green=parseInt(color.slice(3,5),16),blue=parseInt(color.slice(5,7),16);
+      const tolerance=Math.max(0,Math.min(64,Number(board.backgroundTransparency.tolerance)||0));
+      for(let index=0;index<data.length;index+=4){if(Math.max(Math.abs(data[index]-red),Math.abs(data[index+1]-green),Math.abs(data[index+2]-blue))<=tolerance)data[index+3]=0;}
+      context.putImageData(pixels,0,0);
+      const dataUrl=canvas.toDataURL('image/png');
+      if(transparencyKey(board)===key&&board.image===source)transparentImageCache.set(board.id,{key,source,dataUrl});
+      return dataUrl;
+    })().finally(()=>{const job=transparentImageJobs.get(board.id);if(job?.key===key&&job?.source===source)transparentImageJobs.delete(board.id);});
+    transparentImageJobs.set(board.id,{key,source,promise});
+    return promise;
+  }
 
   function loadState() {
     try {
@@ -195,7 +234,7 @@
   function renderBoardList() {
     const query = $('#boardSearch').value.trim().toLowerCase();
     const list = state.boards.filter(b => b.name.toLowerCase().includes(query));
-    $('#boardList').innerHTML = list.map(b => `<div class="board-row"><button class="board-item ${b.id === selectedBoardId ? 'active' : ''}" data-id="${b.id}"><img class="board-thumb" src="${b.image || placeholderSvg(b.name)}" alt=""><span><strong>${escapeHtml(b.name)}</strong><small>${b.interfaces.length} 个接口${b.builtIn?' · 默认':''}</small></span></button><button class="board-delete ${b.builtIn?'locked':''}" data-delete-id="${b.id}" ${b.builtIn?'disabled title="默认板卡不能删除"':'title="删除板卡"'}>${b.builtIn?'▣':'×'}</button></div>`).join('') || '<div class="property-empty"><p>没有匹配的板卡</p></div>';
+    $('#boardList').innerHTML = list.map(b => `<div class="board-row"><button class="board-item ${b.id === selectedBoardId ? 'active' : ''}" data-id="${b.id}"><img class="board-thumb" src="${boardImageSource(b) || placeholderSvg(b.name)}" alt=""><span><strong>${escapeHtml(b.name)}</strong><small>${b.interfaces.length} 个接口${b.builtIn?' · 默认':''}</small></span></button><button class="board-delete ${b.builtIn?'locked':''}" data-delete-id="${b.id}" ${b.builtIn?'disabled title="默认板卡不能删除"':'title="删除板卡"'}>${b.builtIn?'▣':'×'}</button></div>`).join('') || '<div class="property-empty"><p>没有匹配的板卡</p></div>';
     $$('.board-item').forEach(el => el.onclick = () => selectBoard(el.dataset.id));
     $$('.board-delete:not(:disabled)').forEach(el => el.onclick = () => deleteBoard(el.dataset.deleteId));
   }
@@ -215,6 +254,9 @@
     $('#boardBreadcrumb').textContent = board.name;
     const generated=board.source==='generated';
     $('#virtualBoardControls').classList.toggle('hidden',!generated);
+    $('#imageTransparencyControls').classList.toggle('hidden',generated||!board.image);
+    if(generated||!board.image)setTransparentColorPicking(false);
+    renderTransparencyControls(board);
     if(generated){
       $('#virtualBoardWidth').value=board.generated.width;
       $('#virtualBoardHeight').value=board.generated.height;
@@ -222,7 +264,7 @@
     }
     const img = $('#boardImage');
     if (board.image) {
-      img.src = board.image;
+      img.src = boardImageSource(board);
       img.style.display = 'block';
       $('#imageWorkspace').classList.remove('hidden');
       $('#emptyImage').classList.add('hidden');
@@ -234,6 +276,7 @@
         requestAnimationFrame(syncOverlay);
       };
       img.complete ? ready() : img.onload = ready;
+      if(board.backgroundTransparency&&boardImageSource(board)===board.image)ensureTransparentBoardImage(board).then(()=>{if(currentBoard()===board){img.onload=ready;img.src=boardImageSource(board);}renderBoardList();renderComponentList();if($('#assemblyView').classList.contains('active'))renderAssembly();}).catch(()=>toast('图片透明背景处理失败'));
     } else {
       img.style.display = 'none';
       $('#imageWorkspace').classList.add('hidden');
@@ -241,6 +284,44 @@
       $('#interfaceOverlay').innerHTML = '';
     }
     renderInterfaceForm();
+  }
+
+  function setTransparentColorPicking(active) {
+    transparentColorPicking=!!active;
+    $('#imageStage').classList.toggle('color-picking',transparentColorPicking);
+    $('#pickTransparentColorBtn').classList.toggle('active',transparentColorPicking);
+    $('#pickTransparentColorBtn').textContent=transparentColorPicking?'请点击图片取色':'吸取透明色';
+  }
+
+  function renderTransparencyControls(board=currentBoard()) {
+    const config=board?.source==='image'?board.backgroundTransparency:null,status=$('#transparentColorStatus');
+    status.querySelector('span').textContent=config?.color?.toUpperCase()||'尚未设置';
+    status.querySelector('i').style.background=config?.color||'';
+    $('#clearTransparentColorBtn').classList.toggle('hidden',!config);
+  }
+
+  async function pickTransparentColor(e) {
+    const board=currentBoard(),overlay=$('#interfaceOverlay'),rect=overlay.getBoundingClientRect();
+    if(e.button!==0||!board?.image||board.source!=='image'||e.clientX<rect.left||e.clientX>rect.right||e.clientY<rect.top||e.clientY>rect.bottom)return;
+    setTransparentColorPicking(false);
+    try {
+      const image=await loadImageSource(board.image),canvas=document.createElement('canvas');canvas.width=image.naturalWidth;canvas.height=image.naturalHeight;
+      const context=canvas.getContext('2d',{willReadFrequently:true});context.drawImage(image,0,0);
+      const x=Math.min(canvas.width-1,Math.max(0,Math.floor((e.clientX-rect.left)/rect.width*canvas.width)));
+      const y=Math.min(canvas.height-1,Math.max(0,Math.floor((e.clientY-rect.top)/rect.height*canvas.height)));
+      const [red,green,blue]=context.getImageData(x,y,1,1).data;
+      board.backgroundTransparency={color:`#${[red,green,blue].map(value=>value.toString(16).padStart(2,'0')).join('')}`,tolerance:12};
+      transparentImageCache.delete(board.id);saveState();renderTransparencyControls(board);
+      await ensureTransparentBoardImage(board);
+      renderBoardEditor();renderBoardList();renderComponentList();if($('#assemblyView').classList.contains('active'))renderAssembly();
+      toast(`已将 ${board.backgroundTransparency.color.toUpperCase()} 设为透明`);
+    } catch(error) {console.error(error);toast('取色失败，请检查图片格式');}
+  }
+
+  function clearTransparentColor() {
+    const board=currentBoard();if(!board)return;
+    delete board.backgroundTransparency;transparentImageCache.delete(board.id);setTransparentColorPicking(false);saveState();
+    renderBoardEditor();renderBoardList();renderComponentList();if($('#assemblyView').classList.contains('active'))renderAssembly();toast('已恢复图片背景');
   }
 
   function syncOverlay() {
@@ -388,6 +469,8 @@
         targetBoard.image = dataUrl;
         targetBoard.imageSize = {width:probe.naturalWidth, height:probe.naturalHeight};
         targetBoard.source='image';
+        delete targetBoard.backgroundTransparency;
+        transparentImageCache.delete(targetBoard.id);
         delete targetBoard.generated;
         if(targetBoard.id===selectedBoardId)boardZoom=null;
         saveState(); renderBoardEditor(); renderBoardList();
@@ -398,6 +481,7 @@
   }
 
   function onStagePointerDown(e) {
+    if(transparentColorPicking){e.preventDefault();pickTransparentColor(e);return;}
     if (e.button !== 0 || !currentBoard()?.image || e.target.closest('.interface-box')) return;
     const overlay = $('#interfaceOverlay'), r = overlay.getBoundingClientRect();
     if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) return;
@@ -461,6 +545,7 @@
       image:board.image||null,
       imageSize:{width:board.imageSize?.width||420,height:board.imageSize?.height||260,unit:'px'},
       source:board.source||'image',
+      ...(board.source==='image'&&board.backgroundTransparency?{backgroundTransparency:structuredClone(board.backgroundTransparency)}:{}),
       ...(board.source==='generated'?{generated:structuredClone(board.generated)}:{}),
       interfaces:board.interfaces.map((intf,index)=>({
         id:intf.id,
@@ -526,7 +611,7 @@
   }
 
   function renderComponentList() {
-    $('#componentList').innerHTML = state.boards.map(b => `<div class="component-card" draggable="true" data-id="${b.id}"><img src="${b.image || placeholderSvg(b.name)}" alt=""><span><strong>${escapeHtml(b.name)}</strong><small>${b.interfaces.length} 个接口 · 点击添加</small></span></div>`).join('');
+    $('#componentList').innerHTML = state.boards.map(b => `<div class="component-card" draggable="true" data-id="${b.id}"><img src="${boardImageSource(b) || placeholderSvg(b.name)}" alt=""><span><strong>${escapeHtml(b.name)}</strong><small>${b.interfaces.length} 个接口 · 点击添加</small></span></div>`).join('');
     $$('.component-card').forEach(card => {
       card.onclick = () => addNode(card.dataset.id);
       card.ondragstart = e => e.dataTransfer.setData('text/pcb-id', card.dataset.id);
@@ -571,7 +656,7 @@
         });
       }).join('');
       const source=geometry.source,rotation=nodeRotation(node),scaleX=nodeFlipX(node)?-1:1;
-      const imageSource=board.source==='generated'?placeholderSvg('',board.generated?.width,board.generated?.height,board.generated?.color):board.image;
+      const imageSource=board.source==='generated'?placeholderSvg('',board.generated?.width,board.generated?.height,board.generated?.color):boardImageSource(board);
       const generatedName=board.source==='generated'?`<span class="generated-node-name" style="left:${geometry.centerX}px;top:${geometry.centerY}px">${escapeHtml(board.name)}</span>`:'';
       return `<article class="board-node ${node.id===selectedNodeId?'selected':''} ${nodeFixed(node)?'fixed':''}" data-id="${node.id}" style="left:${node.x}px;top:${node.y}px"><div class="node-body">${imageSource?`<img src="${imageSource}" data-board="${board.id}" alt="" style="left:${source.x}px;top:${source.y}px;width:${source.width}px;height:${source.height}px;transform:rotate(${rotation}deg) scaleX(${scaleX});transform-origin:center">`:`<div class="node-placeholder" style="transform:rotate(${rotation}deg) scaleX(${scaleX})"></div>`}${generatedName}</div><footer class="node-header"><strong>${nodeFixed(node)?'<span class="node-fixed-mark" title="位置已固定">◆</span> ':''}${escapeHtml(node.label)}</strong><button class="node-action node-scale-down" title="缩小板卡">−</button><span class="node-scale-label">${Math.round(nodeScale(node)*100)}%</span><button class="node-action node-scale-up" title="放大板卡">＋</button><button class="node-action node-flip" title="水平翻转">⇆</button><button class="node-action node-rotate" title="顺时针旋转 90°">↻</button><button class="node-action node-remove" title="移除板卡">×</button></footer>${ports}${pins}</article>`;
     }).join('');
@@ -755,7 +840,7 @@
   function getInterfaceAnchor(board, intf, node) {
     const rect=intf.rect,base=baseInterfaceSide(rect),side=transformDirection(base.side,node);
     const centerX=rect.x+rect.w/2,centerY=rect.y+rect.h/2;
-    const normalized=base.side==='left'?{x:0,y:centerY}:base.side==='right'?{x:1,y:centerY}:base.side==='top'?{x:centerX,y:0}:{x:centerX,y:1};
+    const normalized=base.side==='left'?{x:rect.x,y:centerY}:base.side==='right'?{x:rect.x+rect.w,y:centerY}:base.side==='top'?{x:centerX,y:rect.y}:{x:centerX,y:rect.y+rect.h};
     const point=pointOnOriginalBoard(board,node,normalized.x,normalized.y);
     const direction={left:{dx:-1,dy:0},right:{dx:1,dy:0},top:{dx:0,dy:-1},bottom:{dx:0,dy:1}}[side];
     return {...base,...direction,side,...point};
@@ -765,8 +850,8 @@
   function pinTagWidth(label){return Math.max(15,Math.min(46,displayPinName(label).length*4.5+6));}
 
   function interfaceEdgeGeometry(board,intf,node,base) {
-    const first=base.side==='left'?{x:0,y:intf.rect.y}:base.side==='right'?{x:1,y:intf.rect.y}:base.side==='top'?{x:intf.rect.x,y:0}:{x:intf.rect.x,y:1};
-    const last=base.side==='left'?{x:0,y:intf.rect.y+intf.rect.h}:base.side==='right'?{x:1,y:intf.rect.y+intf.rect.h}:base.side==='top'?{x:intf.rect.x+intf.rect.w,y:0}:{x:intf.rect.x+intf.rect.w,y:1};
+    const first=base.side==='left'?{x:intf.rect.x,y:intf.rect.y}:base.side==='right'?{x:intf.rect.x+intf.rect.w,y:intf.rect.y}:base.side==='top'?{x:intf.rect.x,y:intf.rect.y}:{x:intf.rect.x,y:intf.rect.y+intf.rect.h};
+    const last=base.side==='left'?{x:intf.rect.x,y:intf.rect.y+intf.rect.h}:base.side==='right'?{x:intf.rect.x+intf.rect.w,y:intf.rect.y+intf.rect.h}:base.side==='top'?{x:intf.rect.x+intf.rect.w,y:intf.rect.y}:{x:intf.rect.x+intf.rect.w,y:intf.rect.y+intf.rect.h};
     const a=pointOnOriginalBoard(board,node,first.x,first.y),b=pointOnOriginalBoard(board,node,last.x,last.y);
     const span=Math.max(1,Math.hypot(b.x-a.x,b.y-a.y));
     return {span,dx:(b.x-a.x)/span,dy:(b.y-a.y)/span};
@@ -785,7 +870,7 @@
         const reversed=(base.side==='top'||base.side==='bottom')?rotation===180:rotation===270;
         const physicalIndex=reversed?count-index-1:index;
         const ratio=(physicalIndex+.5)/count;
-        const normalized=base.side==='left'?{x:0,y:intf.rect.y+ratio*intf.rect.h}:base.side==='right'?{x:1,y:intf.rect.y+ratio*intf.rect.h}:base.side==='top'?{x:intf.rect.x+ratio*intf.rect.w,y:0}:{x:intf.rect.x+ratio*intf.rect.w,y:1};
+        const normalized=base.side==='left'?{x:intf.rect.x,y:intf.rect.y+ratio*intf.rect.h}:base.side==='right'?{x:intf.rect.x+intf.rect.w,y:intf.rect.y+ratio*intf.rect.h}:base.side==='top'?{x:intf.rect.x+ratio*intf.rect.w,y:intf.rect.y}:{x:intf.rect.x+ratio*intf.rect.w,y:intf.rect.y+intf.rect.h};
         const point=pointOnOriginalBoard(board,node,normalized.x,normalized.y);
         const tagShift=(physicalIndex-(count-1)/2)*labelGap;
         result.set(`${intf.id}:${index+1}`,{...anchor,...point,tagX:point.x+edge.dx*tagShift,tagY:point.y+edge.dy*tagShift,tagVertical,tagThickness});
@@ -1192,7 +1277,7 @@
     const nodeMarkup = nodes.map(node => {
       const board=state.boards.find(b=>b.id===node.boardId); if(!board)return '';
       const geometry=getBoardImageGeometry(board,node),source=geometry.source,scaleX=nodeFlipX(node)?-1:1;
-      const image=board.source==='generated'?generatedBoardSvg(board,source,false):board.image?`<image href="${escapeXml(board.image)}" x="${source.x}" y="${source.y}" width="${source.width}" height="${source.height}" preserveAspectRatio="none" filter="url(#shadow)"/>`:`<rect x="${source.x}" y="${source.y}" width="${source.width}" height="${source.height}" rx="5" fill="#28513f" stroke="#c49b41" stroke-width="5" filter="url(#shadow)"/>`;
+      const imageSource=boardImageSource(board),image=board.source==='generated'?generatedBoardSvg(board,source,false):imageSource?`<image href="${escapeXml(imageSource)}" x="${source.x}" y="${source.y}" width="${source.width}" height="${source.height}" preserveAspectRatio="none" filter="url(#shadow)"/>`:`<rect x="${source.x}" y="${source.y}" width="${source.width}" height="${source.height}" rx="5" fill="#28513f" stroke="#c49b41" stroke-width="5" filter="url(#shadow)"/>`;
       const transform=`translate(${geometry.centerX} ${geometry.centerY}) rotate(${geometry.rotation}) scale(${scaleX} 1) translate(${-geometry.centerX} ${-geometry.centerY})`;
       const generatedName=board.source==='generated'?`<text x="${geometry.centerX}" y="${geometry.centerY}" text-anchor="middle" dominant-baseline="middle" font-size="11" font-weight="800" fill="#eef8f3">${escapeXml(board.name)}</text>`:'';
       return `<g transform="translate(${node.x} ${node.y})"><g transform="${transform}">${image}</g>${generatedName}</g>`;
@@ -1215,7 +1300,7 @@
     button.disabled=true;button.textContent='渲染中…';
     try {
       const usedBoards=[...new Set(state.assembly.nodes.map(n=>n.boardId))].map(id=>state.boards.find(b=>b.id===id)).filter(Boolean);
-      await Promise.all(usedBoards.map(ensureBoardImageSize));
+      await Promise.all(usedBoards.map(board=>Promise.all([ensureBoardImageSize(board),ensureTransparentBoardImage(board)])));
       saveState();
       const svg=buildAssemblySvg();
       const svgBlob=new Blob([svg],{type:'image/svg+xml;charset=utf-8'});
@@ -1242,7 +1327,7 @@
     button.disabled=true;button.textContent='生成中…';
     try {
       const usedBoards=[...new Set(state.assembly.nodes.map(n=>n.boardId))].map(id=>state.boards.find(b=>b.id===id)).filter(Boolean);
-      await Promise.all(usedBoards.map(ensureBoardImageSize));
+      await Promise.all(usedBoards.map(board=>Promise.all([ensureBoardImageSize(board),ensureTransparentBoardImage(board)])));
       saveState();
       downloadBlob(new Blob([buildAssemblySvg()],{type:'image/svg+xml;charset=utf-8'}),`${safeFileName(state.assembly.name)}.svg`);
       toast('SVG 已导出');
@@ -1273,7 +1358,7 @@
       const doc=await fetch(source).then(response=>{if(!response.ok)throw new Error(`HTTP ${response.status}`);return response.json();});
       if(!loadAssemblyDocument(doc))throw new Error('Invalid assembly');
       if(params.get('render')==='svg'){
-        await Promise.all(state.boards.map(ensureBoardImageSize));
+        await Promise.all(state.boards.map(board=>Promise.all([ensureBoardImageSize(board),ensureTransparentBoardImage(board)])));
         document.documentElement.innerHTML=`<head><meta charset="UTF-8"><title>${escapeHtml(state.assembly.name)}</title><style>html,body{margin:0;background:#fff}svg{display:block}</style></head><body>${buildAssemblySvg()}</body>`;
       }else switchView('assembly');
     }catch(error){console.error(error);toast('无法加载 URL 中的装配体');}
@@ -1294,6 +1379,8 @@
     $('#virtualBoardWidth').onchange=applyVirtualBoardSettings;
     $('#virtualBoardHeight').onchange=applyVirtualBoardSettings;
     $('#virtualBoardColor').oninput=applyVirtualBoardSettings;
+    $('#pickTransparentColorBtn').onclick=()=>setTransparentColorPicking(!transparentColorPicking);
+    $('#clearTransparentColorBtn').onclick=clearTransparentColor;
     $('#imageStage').onpointerdown=onStagePointerDown;$('#imageStage').onpointermove=onStagePointerMove;$('#imageStage').onpointerup=onStagePointerUp;$('#imageStage').onpointercancel=onStagePointerUp;
     $('#imageStage').addEventListener('wheel',e=>{if(e.ctrlKey||e.metaKey){e.preventDefault();changeBoardZoom(e.deltaY<0?1.12:.89);}},{passive:false});
     $('#interfaceName').oninput=e=>{const i=currentInterface();i.name=e.target.value;saveState();renderInterfaces();renderBoardList();};
@@ -1353,5 +1440,8 @@
   }
 
   globalThis.WireSketchRenderer={renderAssemblyDocumentSvg};
-  if(typeof document!=='undefined'){bindEvents();renderBoardList();renderBoardEditor();bootstrapAssemblyPreview();}
+  if(typeof document!=='undefined'){
+    bindEvents();renderBoardList();renderBoardEditor();bootstrapAssemblyPreview();
+    Promise.all(state.boards.filter(board=>board.backgroundTransparency).map(ensureTransparentBoardImage)).then(()=>{renderBoardList();renderComponentList();if($('#assemblyView').classList.contains('active'))renderAssembly();}).catch(error=>console.error('Background transparency processing failed',error));
+  }
 })();
